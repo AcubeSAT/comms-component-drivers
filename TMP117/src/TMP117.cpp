@@ -5,7 +5,7 @@ namespace TMP117 {
 
     etl::pair<Error, std::optional<uint16_t>> TMP117::readRegister(RegisterAddress targetRegister) {
         uint8_t target_reg = static_cast<uint8_t>(targetRegister);
-        uint8_t *buf;
+        uint8_t buf[2];
 
         if (HAL_I2C_Master_Transmit(&hi2c1, i2cSlaveAddress, &target_reg, 1, MaxTimeoutDelay) != HAL_OK) {
             return etl::make_pair(Error::Timeout, NULL);
