@@ -851,7 +851,7 @@ public:
 	 * @param err				Pointer to raised error
 	 * @return rssi				Received Signal Strength
 	 */
-	uint8_t get_rssi(Transceiver transceiver, Error &err);
+	int8_t get_rssi(Transceiver transceiver, Error &err);
 
 	/*
 	 * Set receiver energy detection average duration given by df*dtb

@@ -1177,7 +1177,7 @@ OQPSKChipFrequency AT86RF215::get_oqpsk_chip_frequency(Transceiver transceiver,
 	return static_cast<OQPSKChipFrequency>(freq);
 }
 
-uint8_t AT86RF215::get_rssi(Transceiver transceiver, Error &err) {
+int8_t AT86RF215::get_rssi(Transceiver transceiver, Error &err) {
 	RegisterAddress regrssi;
 
 	if (transceiver == RF09) {
@@ -1224,9 +1224,11 @@ int8_t AT86RF215::get_receiver_energy_detection(Transceiver transceiver,
 	RegisterAddress regrssi;
 
 	if (transceiver == RF09) {
-		regrssi = RF09_RSSI;
+//		regrssi = RF09_RSSI;
+        regrssi = RF09_EDV;
 	} else if (transceiver == RF24) {
-		regrssi = RF24_RSSI;
+//		regrssi = RF24_RSSI;
+        regrssi = RF24_EDV;
 	}
 
 	int8_t reg = static_cast<int8_t>(spi_read_8(regrssi, err));
