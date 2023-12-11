@@ -1557,7 +1557,7 @@ void AT86RF215::setup_rx_frontend(Transceiver transceiver, bool if_inversion,
 		return;
 	}
 
-	// Set RFn_AGC
+	// Set RFn_AGCC
 	reg = (static_cast<uint8_t>(agc_input) << 6)
 			| (static_cast<uint8_t>(agc_avg_sample) << 4);
 	spi_write_8(regagcc, reg, err);
@@ -1565,7 +1565,7 @@ void AT86RF215::setup_rx_frontend(Transceiver transceiver, bool if_inversion,
 		return;
 	}
 
-	// Set RFn_AGCG
+	// Set RFn_AGCS
 	reg = (static_cast<uint8_t>(agc_target) << 5) | gain_control_word;
 	spi_write_8(regagcs, reg, err);
 }

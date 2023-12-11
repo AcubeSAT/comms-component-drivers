@@ -10,8 +10,11 @@ struct AT86RF215Configuration {
 			ReceiverEnergyDetectionAveragingDuration::REDAD_8U;
 	ReceiverBandwidth receiverBandwidth =
 			ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
-	RxRelativeCutoffFrequency rxRelativeCutoffFrequency =
-			RxRelativeCutoffFrequency::FCUT_025;
+//	RxRelativeCutoffFrequency rxRelativeCutoffFrequency =
+//			RxRelativeCutoffFrequency::FCUT_025;
+    RxRelativeCutoffFrequency rxRelativeCutoffFrequency =
+            RxRelativeCutoffFrequency::FCUT_0375;
+
 	ReceiverSampleRate receiverSampleRate = ReceiverSampleRate::FS_4000;
 	HighRateLegacyOQPSK highRateLegacyOQPSK = HighRateLegacyOQPSK::HDRL_DISABLED;
 	SFDSearchSpace sfdSearchSpace = SFDSearchSpace::NSFD1;
@@ -109,7 +112,9 @@ struct AT86RF215Configuration {
 	bool ifInversion24 = false;
 	bool ifShift09 = false;
 	bool ifShift24 = false;
-	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
+//	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
+    ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW160KHZ_IF250KHZ;
+
 	ReceiverBandwidth rxBandwidth24 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
 	RxRelativeCutoffFrequency rxRelativeCutoffFrequency09 =
 			RxRelativeCutoffFrequency::FCUT_025;
@@ -125,7 +130,9 @@ struct AT86RF215Configuration {
 			AverageTimeNumberSamples::AVGS_8;
 	bool agcEnabled09 = true;
 	bool agcEnabled24 = true;
-	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB42;
+//	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB42;
+    AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB24;
+
 	AutomaticGainTarget automaticGainControlTarget24 = AutomaticGainTarget::DB42;
 	uint8_t gainControlWord09 = 0x17;
 	uint8_t gainControlWord24 = 0x17;
