@@ -10,13 +10,17 @@
 #include <optional>
 #include <cstdint>
 #include "main.h"
-#include "etl/utility.h"
+//#include "etl/utility.h"
 
 // creating a 'namespace' in order to not conflict variables' names with other coders
 namespace PSU {
 
     class PSU {
 
+        PSU(void) {};
+
+        void enable_PSU_parts() ;
+        void PG_read() ;
     };
 }
 
