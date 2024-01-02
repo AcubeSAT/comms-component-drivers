@@ -20,7 +20,7 @@ namespace PSU {
         PSU(void) {};
 
         void enable_PSU_parts() ;
-        void PG_read() ;
+        bool PG_read() ;
     };
 }
 
