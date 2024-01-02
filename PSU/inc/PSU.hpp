@@ -1,10 +1,3 @@
-//
-// Created by ntoylker on 27/12/2023.
-//
-
-//#ifndef STM32H7A3ZIQSETUP_PSU_HPP
-//#define STM32H7A3ZIQSETUP_PSU_HPP
-
 #pragma once
 
 #include <optional>
@@ -16,11 +9,17 @@
 namespace PSU {
 
     class PSU {
-
+    public:
         PSU(void) {};
 
-        void enable_PSU_parts() ;
-        bool PG_read() ;
+        void enable_FPGA_PSU();
+        void disable_FPGA_PSU();
+        void enable_RF_PSU();
+        void disable_RF_PSU();
+
+        bool PG_read();
+
+        void solve_PG_fault();
     };
 }
 
