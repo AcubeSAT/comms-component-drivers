@@ -12,14 +12,14 @@ namespace PSU {
     public:
         PSU(void) {};
 
-        void enable_FPGA_PSU();
-        void disable_FPGA_PSU();
-        void enable_RF_PSU();
-        void disable_RF_PSU();
+        static void enable_FPGA_PSU();
+        static void disable_FPGA_PSU();
+        static void enable_RF_PSU();
+        static void disable_RF_PSU();
 
-        bool PG_read();
+        static bool PG_read();
 
-        void solve_PG_fault();
+        static void solve_PG_fault();
     };
 }
 
