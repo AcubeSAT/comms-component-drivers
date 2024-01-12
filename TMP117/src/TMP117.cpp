@@ -43,7 +43,7 @@ namespace TMP117 {
             timeoutCounter -= 7; // Rough estimation of elapsed ms
             auto[error, reg] = TMP117::readRegister(RegisterAddress::EEPROMUnlock);
             // Check if EEPROM is still busy
-            if (!(reg.value() && 0x4000)) {
+            if (!(reg.value() & 0x4000)) {
                 // If it's finished abort and start writing
                 break;
             }
