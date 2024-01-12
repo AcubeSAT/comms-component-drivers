@@ -140,7 +140,7 @@ namespace INA3221 {
             }
         }
 
-        return std::tuple{busMeasurement, shuntMeasurement, currentMeasurement, powerMeasurement};
+        return std::tuple{shuntMeasurement, busMeasurement, currentMeasurement, powerMeasurement};
     }
 
     etl::expected<int32_t, Error> INA3221::getShuntVoltage(uint8_t channel) {
@@ -167,7 +167,7 @@ namespace INA3221 {
         }
 
         auto unscaledVolts = static_cast<int16_t>(registerValue.value());
-        unscaledVolts >>= 1;
+        unscaledVolts >>= 3;
         const int32_t uVolts = static_cast<int32_t>(unscaledVolts) * BusVoltBase;
 
         return uVolts;
