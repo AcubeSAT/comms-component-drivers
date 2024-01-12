@@ -9,27 +9,28 @@
 #include "etl/array.h"
 #include "stm32h7xx_hal.h"
 
-/**
- * Converts an enumeration member to its underlying type.
- * Equivalent to std::to_underlying (which is not available atm)
- */
-template <typename T>
-constexpr auto to_underlying(T value) {
-    return static_cast<std::underlying_type_t<T>>(value);
-}
 
 namespace INA3221 {
+    /**
+     * Converts an enumeration member to its underlying type.
+     * Equivalent to std::to_underlying (which is not available atm)
+     */
+    template<typename T>
+    constexpr auto to_underlying(T value) {
+        return static_cast<std::underlying_type_t<T>>(value);
+    }
+
     /// Used for storing the upper and lower voltage bounds in uV
     using VoltageThreshold = etl::pair<int32_t, int32_t>;
 
     /// Used for storing the voltage (either shunt or bus) value of the 3 channels in uV
-    using VoltageMeasurement = etl::array<etl::optional<int32_t>, 3>; 
+    using VoltageMeasurement = etl::array<etl::optional<int32_t>, 3>;
     /// Used for storing the current value of the 3 channels in uA
-    using CurrentMeasurement = etl::array<etl::optional<int32_t>, 3>; 
+    using CurrentMeasurement = etl::array<etl::optional<int32_t>, 3>;
     /// Used for storing the power consumption value of the 3 channels in mW
-    using PowerMeasurement = etl::array<etl::optional<float>, 3>; 
+    using PowerMeasurement = etl::array<etl::optional<float>, 3>;
     /// Used for storing all of the measurements of the 3 channels 
-    using ChannelMeasurement = std::tuple<VoltageMeasurement, VoltageMeasurement, CurrentMeasurement, PowerMeasurement>; 
+    using ChannelMeasurement = std::tuple<VoltageMeasurement, VoltageMeasurement, CurrentMeasurement, PowerMeasurement>;
 
     /// Device I2C addresses
     enum class I2CAddress : uint16_t {
@@ -204,30 +205,30 @@ namespace INA3221 {
         AveragingMode averagingMode = AveragingMode::AVG_1;
 
         /**
-          * Time of bus voltage measurement conversion.
-          * This value should be selected according to the time requirements of the application.
-          * Note that it applies to all channels
+         * Time of bus voltage measurement conversion.
+         * This value should be selected according to the time requirements of the application.
+         * Note that it applies to all channels
          */
         ConversionTime busVoltageTime = ConversionTime::V_1_1_MS;
 
         /**
-          * Time of shunt voltage measurement conversion.
-          * This value should be selected according to the time requirements of the application.
-          * Note that it applies to all channels
+         * Time of shunt voltage measurement conversion.
+         * This value should be selected according to the time requirements of the application.
+         * Note that it applies to all channels
          */
         ConversionTime shuntVoltageTime = ConversionTime::V_1_1_MS;
 
         /**
          * Select mode operation of INNA3211. The main three modes are:
-         *  - Power down: Turns off the current drawn to reduce power consumption. Switching from power-down
-         *  mode takes approximately 40 us. I2C communication is still enabled while in this mode
-         *  - Single shot: Measurements are taken only whenever this register is written and set to single shot mode
-         *  (there's no need to switch the value from a previous different state).
-         *  - Continuous: Measurements are constantly taken periodically until the mode is switched to either
-         *  single-shot or power down
+         * - Power down: Turns off the current drawn to reduce power consumption. Switching from power-down
+         * mode takes approximately 40 us. I2C communication is still enabled while in this mode
+         * - Single shot: Measurements are taken only whenever this register is written and set to single shot mode
+         * (there's no need to switch the value from a previous different state).
+         * - Continuous: Measurements are constantly taken periodically until the mode is switched to either
+         * single-shot or power down
          *
-         *  This register also controls whether this is applies only to shunt voltage, bus voltage
-         *  or both.
+         * This register also controls whether this is applies only to shunt voltage, bus voltage
+         * or both.
          */
         OperatingMode operatingMode = OperatingMode::SHUNT_BUS_VOLTAGE_CONT;
 
