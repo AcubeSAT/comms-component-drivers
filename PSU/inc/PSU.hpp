@@ -12,6 +12,8 @@ namespace PSU {
     public:
         PSU(void) {};
 
+        static bool isOff(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
+
         /* Sets P5V_FPGA_EN_Pin PD8 to state SET */
         static void enable_FPGA_PSU();
         /* Resets P5V_FPGA_EN_Pin PD8 to state RESET */

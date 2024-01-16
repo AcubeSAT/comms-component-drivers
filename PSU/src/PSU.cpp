@@ -22,45 +22,42 @@ namespace PSU {
         HAL_Delay(100);
     }
 
-    bool PSU::PG_read() {
-        GPIO_PinState pinstate_temporary[3];
-        pinstate_temporary[0] = HAL_GPIO_ReadPin(P5V_FPGA_PG_GPIO_Port, P5V_FPGA_PG_Pin);
-        pinstate_temporary[1] = HAL_GPIO_ReadPin(P5V_RF_PG_GPIO_Port, P5V_RF_PG_Pin);
-        pinstate_temporary[2] = HAL_GPIO_ReadPin(P3V3_RF_PG_GPIO_Port, P3V3_RF_PG_Pin);
+    bool PSU::isOff(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
+        GPIO_PinState pinstate_temporary;
+        pinstate_temporary = HAL_GPIO_ReadPin(GPIOx, GPIO_Pin);
 
-        if (pinstate_temporary[0] == GPIO_PIN_SET
-        && pinstate_temporary[1] == GPIO_PIN_SET
-        && pinstate_temporary[2] == GPIO_PIN_SET)
+        if (pinstate_temporary == GPIO_PIN_RESET)
             return true;
-        else
+        else // is SET
             return false;
+    }
+    bool PSU::PG_read() {
+        if ( isOff(P5V_FPGA_PG_GPIO_Port, P5V_FPGA_PG_Pin)
+        || isOff(P5V_RF_PG_GPIO_Port, P5V_RF_PG_Pin)
+        || isOff(P3V3_RF_PG_GPIO_Port, P3V3_RF_PG_Pin) )
+            return false;
+        else
+            return true;
     }
 
     void PSU::solve_PG_fault() {
-        GPIO_PinState pinstate_temporary[3];
-        pinstate_temporary[0] = HAL_GPIO_ReadPin(P5V_FPGA_PG_GPIO_Port, P5V_FPGA_PG_Pin);
-        pinstate_temporary[1] = HAL_GPIO_ReadPin(P5V_RF_PG_GPIO_Port, P5V_RF_PG_Pin);
-        pinstate_temporary[2] = HAL_GPIO_ReadPin(P3V3_RF_PG_GPIO_Port, P3V3_RF_PG_Pin);
 
         // P5V_FPGA_PG error fault detection
-        while(pinstate_temporary[0] == GPIO_PIN_RESET){
+        while(isOff(P5V_FPGA_PG_GPIO_Port, P5V_FPGA_PG_Pin)){
             disable_FPGA_PSU();
             enable_FPGA_PSU();
-            pinstate_temporary[0] = HAL_GPIO_ReadPin(P5V_FPGA_PG_GPIO_Port, P5V_FPGA_PG_Pin);
         }
 
         // (P5V) RF_PG error fault detection
-        while(pinstate_temporary[1] == GPIO_PIN_RESET) {
+        while(isOff(P5V_RF_PG_GPIO_Port, P5V_RF_PG_Pin)) {
             disable_RF_PSU();
             enable_RF_PSU();
-            pinstate_temporary[1] = HAL_GPIO_ReadPin(P5V_RF_PG_GPIO_Port, P5V_RF_PG_Pin);
         }
 
         // (P3V3) RF_PG error fault detection
-        while(pinstate_temporary[2] == GPIO_PIN_RESET) {
+        while(isOff(P3V3_RF_PG_GPIO_Port, P3V3_RF_PG_Pin)) {
             disable_RF_PSU();
             enable_RF_PSU();
-            pinstate_temporary[2] = HAL_GPIO_ReadPin(P3V3_RF_PG_GPIO_Port, P3V3_RF_PG_Pin);
         }
     }
 }
