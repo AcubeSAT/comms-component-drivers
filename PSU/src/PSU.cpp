@@ -4,21 +4,12 @@
 
 
 namespace PSU {
-    void PSU::enable_FPGA_PSU() {
-        HAL_GPIO_WritePin(P5V_FPGA_EN_GPIO_Port, P5V_FPGA_EN_Pin, GPIO_PIN_SET);
+    void PSU::enablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
+        HAL_GPIO_WritePin(GPIOx, GPIO_Pin, GPIO_PIN_SET);
         HAL_Delay(100);
     }
-    void PSU::disable_FPGA_PSU(){
-        HAL_GPIO_WritePin(P5V_FPGA_EN_GPIO_Port, P5V_FPGA_EN_Pin, GPIO_PIN_RESET);
-        HAL_Delay(100);
-    }
-
-    void PSU::enable_RF_PSU() {
-        HAL_GPIO_WritePin(P5V_RF_EN_GPIO_Port, P5V_RF_EN_Pin, GPIO_PIN_SET);
-        HAL_Delay(100);
-    }
-    void PSU::disable_RF_PSU() {
-        HAL_GPIO_WritePin(P5V_RF_EN_GPIO_Port, P5V_RF_EN_Pin, GPIO_PIN_RESET);
+    void PSU::disablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin){
+        HAL_GPIO_WritePin(GPIOx, GPIO_Pin, GPIO_PIN_RESET);
         HAL_Delay(100);
     }
 
@@ -40,24 +31,11 @@ namespace PSU {
             return true;
     }
 
-    void PSU::solve_PG_fault() {
-
-        // P5V_FPGA_PG error fault detection
-        while(isOff(P5V_FPGA_PG_GPIO_Port, P5V_FPGA_PG_Pin)){
-            disable_FPGA_PSU();
-            enable_FPGA_PSU();
-        }
-
-        // (P5V) RF_PG error fault detection
-        while(isOff(P5V_RF_PG_GPIO_Port, P5V_RF_PG_Pin)) {
-            disable_RF_PSU();
-            enable_RF_PSU();
-        }
-
-        // (P3V3) RF_PG error fault detection
-        while(isOff(P3V3_RF_PG_GPIO_Port, P3V3_RF_PG_Pin)) {
-            disable_RF_PSU();
-            enable_RF_PSU();
+    void PSU::solvePGfault(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
+        // hops into a loop until the PIN is ON
+        while(isOff(GPIOx, GPIO_Pin)){
+            disablePartPSU(GPIOx, GPIO_Pin);
+            enablePartPSU(GPIOx, GPIO_Pin);
         }
     }
 }

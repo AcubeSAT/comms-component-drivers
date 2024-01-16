@@ -14,15 +14,10 @@ namespace PSU {
 
         static bool isOff(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
 
-        /* Sets P5V_FPGA_EN_Pin PD8 to state SET */
-        static void enable_FPGA_PSU();
-        /* Resets P5V_FPGA_EN_Pin PD8 to state RESET */
-        static void disable_FPGA_PSU();
-
-        /* Sets P5V_RF_EN pin PE13 to state SET */
-        static void enable_RF_PSU();
-        /* Resets P5V_RF_EN pin PE13 to state RESET */
-        static void disable_RF_PSU();
+        /* Sets given Pin to state SET */
+        static void enablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
+        /* Resets given Pin to state RESET */
+        static void disablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
 
         /* Reads the Power-Good (PG) signals from 3 pins:
           P5V_FPGA_PG pin PD9
@@ -31,9 +26,8 @@ namespace PSU {
         and returns 'true' if all 3 are in SET state or else 'false' */
         static bool PG_read();
 
-        /* Solves PG_fault error. If at least 1 pin out of the 3 returns RESET state,
-        this function checks which pin/pins has/have the problem and steps in to set in SET state*/
-        static void solve_PG_fault();
+        /* */
+        static void solvePGfault(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
     };
 }
 
