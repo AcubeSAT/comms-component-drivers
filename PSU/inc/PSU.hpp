@@ -8,7 +8,46 @@ namespace PSU {
 
     class PSU {
     public:
-        PSU(void) {};
+
+        GPIO_TypeDef *p5vFPGApgPORT;
+        uint16_t p5vFPGApgPIN;
+
+        GPIO_TypeDef *p5vRFpgPORT;
+        uint16_t p5vRFpgPIN;
+
+        GPIO_TypeDef *p3v3RFenPORT;
+        uint16_t p3v3RFpgPIN;
+
+        GPIO_TypeDef *p5vFPGAenPORT;
+        uint16_t p5vFPGAenPIN;
+
+        GPIO_TypeDef *p5vRFenPORT;
+        uint16_t p5vRFenPIN;
+        /**
+         * @param p5vFPGApgPORT  P5V_FPGA_PG_PORT
+         * @param p5vFPGApgPIN P5V_FPGA_PG_PIN
+         * @param p5vRFpgPORT P5V_RF_PG_PORT
+         * @param p5vRFpgPIN P5V_RF_PG_PIN
+         * @param p3v3RFenPORT P3V3_RF_PG_PORT
+         * @param p3v3RFpgPIN P3V3_RF_PG_PIN
+         * @param p5vFPGAenPORT P5V_FPGA_EN_PORT
+         * @param p5vFPGAenPIN P5V_FPGA_EN_PIN
+         * @param p5vRFenPORT P5V_RF_EN_PORT
+         * @param p5vRFenPIN P5V_RF_EN_PIN
+         *
+         * @note For comms_eqm_software apply configuration AS IT IS BELOW:
+         *      GPIOD, GPIO_PIN_9
+         *    , GPIOC, GPIO_PIN_7
+         *    , GPIOA, GPIO_PIN_9
+         *    , GPIOD, GPIO_PIN_8
+         *    , GPIOE, GPIO_PIN_13
+         */
+        PSU(GPIO_TypeDef *p5vFPGApgPORT, uint16_t p5vFPGApgPIN
+            , GPIO_TypeDef *p5vRFpgPORT, uint16_t p5vRFpgPIN
+            , GPIO_TypeDef *p3v3RFenPORT, uint16_t p3v3RFpgPIN
+            , GPIO_TypeDef *p5vFPGAenPORT, uint16_t p5vFPGAenPIN
+            , GPIO_TypeDef *p5vRFenPORT, uint16_t p5vRFenPIN);
+
 
         /**
          * @brief Checks whether the given Pin is OFF (RESET STATE)
