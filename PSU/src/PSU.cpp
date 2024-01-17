@@ -20,7 +20,7 @@ namespace PSU {
 
         this->p5vRFenPORT = p5vRFenPORT;
         this->p5vRFenPIN = p5vRFenPIN;
-    };
+    }
 
     void PSU::enablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
         HAL_GPIO_WritePin(GPIOx, GPIO_Pin, GPIO_PIN_SET);
@@ -37,9 +37,9 @@ namespace PSU {
     }
 
     bool PSU::PGread() {
-        if ( isPinOff(P5V_FPGA_PG_GPIO_Port, P5V_FPGA_PG_Pin)
-             || isPinOff(P5V_RF_PG_GPIO_Port, P5V_RF_PG_Pin)
-             || isPinOff(P3V3_RF_PG_GPIO_Port, P3V3_RF_PG_Pin) )
+        if ( isPinOff(p5vFPGApgPORT, p5vFPGApgPIN)
+             || isPinOff(p5vRFpgPORT, p5vRFpgPIN)
+             || isPinOff(p3v3RFenPORT, p3v3RFpgPIN) )
             return false;
         else
             return true;

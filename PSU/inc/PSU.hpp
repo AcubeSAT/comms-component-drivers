@@ -9,20 +9,20 @@ namespace PSU {
     class PSU {
     public:
 
-        GPIO_TypeDef *p5vFPGApgPORT;
-        uint16_t p5vFPGApgPIN;
+        static GPIO_TypeDef *p5vFPGApgPORT;
+        static uint16_t p5vFPGApgPIN;
 
-        GPIO_TypeDef *p5vRFpgPORT;
-        uint16_t p5vRFpgPIN;
+        static GPIO_TypeDef *p5vRFpgPORT;
+        static uint16_t p5vRFpgPIN;
 
-        GPIO_TypeDef *p3v3RFenPORT;
-        uint16_t p3v3RFpgPIN;
+        static GPIO_TypeDef *p3v3RFenPORT;
+        static uint16_t p3v3RFpgPIN;
 
-        GPIO_TypeDef *p5vFPGAenPORT;
-        uint16_t p5vFPGAenPIN;
+        static GPIO_TypeDef *p5vFPGAenPORT;
+        static uint16_t p5vFPGAenPIN;
 
-        GPIO_TypeDef *p5vRFenPORT;
-        uint16_t p5vRFenPIN;
+        static GPIO_TypeDef *p5vRFenPORT;
+        static uint16_t p5vRFenPIN;
         /**
          * @param p5vFPGApgPORT  P5V_FPGA_PG_PORT
          * @param p5vFPGApgPIN P5V_FPGA_PG_PIN
