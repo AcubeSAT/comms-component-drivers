@@ -1,6 +1,5 @@
-#include <cstdint>
 #include "TMP117.hpp"
-
+#include "Task.hpp"
 namespace TMP117 {
 
     etl::pair<Error, std::optional<uint16_t>> TMP117::readRegister(RegisterAddress targetRegister) {
@@ -15,12 +14,12 @@ namespace TMP117 {
             return etl::make_pair(Error::Timeout, NULL);
         }
 
-        return etl::make_pair(Error::NoErrors, ((static_cast<uint16_t>(buf[0]) << 8) | buf[1]));
+        return etl::make_pair(Error::NoErrors, ((static_cast<uint16_t>(buf[0]) << 8) | static_cast<uint16_t>(buf[1])));
     }
 
     Error TMP117::writeRegister(RegisterAddress targetRegister, uint16_t value) {
-        uint8_t buf[] = {static_cast<uint8_t>(targetRegister), static_cast<uint8_t>(value & 0xFF),
-                         static_cast<uint8_t>((value >> 8) & 0xFF)};
+        uint8_t buf[] = {static_cast<uint8_t>(targetRegister), static_cast<uint8_t>((value >> 8) & 0xFF),
+                         static_cast<uint8_t>((value& 0xFF))};
 
         if (HAL_I2C_Master_Transmit(&hi2c1, i2cSlaveAddress, buf, 3, MaxTimeoutDelay) != HAL_OK) {
             return Error::Timeout;
@@ -37,6 +36,7 @@ namespace TMP117 {
         if (error != Error::NoErrors) { return error; }
 
         uint16_t timeoutCounter = MaxTimeoutDelay;
+        bool unlocked = false;
 
         while (timeoutCounter > 0) {
             HAL_Delay(7); // Initial 7 ms wait
@@ -45,11 +45,13 @@ namespace TMP117 {
             // Check if EEPROM is still busy
             if (!(reg.value() & 0x4000)) {
                 // If it's finished abort and start writing
+                unlocked = true;
                 break;
             }
-            // If it times out, abort operation
-            return Error::Timeout;
         }
+
+        //Ensure that EEPROM is unlocked
+        if (!unlocked) {return Error::Timeout;}
 
         if (eepromRegister == 1) {
             error = TMP117::writeRegister(RegisterAddress::EEPROM1, value);
@@ -63,6 +65,17 @@ namespace TMP117 {
             error = TMP117::writeRegister(RegisterAddress::EEPROM3, value);
             return error;
         }
+
+        //The datasheet states that an I2C general call reset is required in order to have the values actually written
+        //to the EEPROM.However,such an action would affect every device on the I2C bus,so a software reset is performed
+        //instead
+        etl::pair<Error,std::optional<uint16_t>> currentVal = readRegister(RegisterAddress::ConfigurationRegister);
+        if (currentVal.first!=NoErrors) {return currentVal.first;}
+
+        error = writeRegister(RegisterAddress::ConfigurationRegister, currentVal.second.value() | 0x2);
+        if (error!=NoErrors) {return error;}
+
+        configure();
 
         return Error::NoErrors;
     }
@@ -112,7 +125,7 @@ namespace TMP117 {
             return etl::make_pair(error, NULL);
         } else {
             error = TMP117::writeRegister(RegisterAddress::TemperatureOffset,
-                                          ~(static_cast<uint8_t>(calibration / temperaturePrecision)) + 1);
+                                          ~(static_cast<uint16_t>(-calibration/temperaturePrecision)) + 1);
             return etl::make_pair(error, NULL);
         }
     }
@@ -125,9 +138,9 @@ namespace TMP117 {
         }
 
         if (reg.value() & 0x8000) {
-            return etl::make_pair(NoErrors, (-(~reg.value() + 1)) * temperaturePrecision);
+            return etl::make_pair(NoErrors, -static_cast<float>(~reg.value() + 1) * temperaturePrecision);
         } else {
-            return etl::make_pair(NoErrors, reg.value() * temperaturePrecision);
+            return etl::make_pair(NoErrors, static_cast<float>(reg.value()) * temperaturePrecision);
         }
     }
 
@@ -159,8 +172,9 @@ namespace TMP117 {
         }
 
         // Continuous mode
-        if ((reg.value()&0x0C00)>>10  == 0x00 || (reg.value()&0xC00)>>10  == 0x3) {
+        if (((reg.value() >> 10) & 0x3) == 0x0 || ((reg.value() >> 10) & 0x3) == 0x2) {
             auto[error, reg] = readRegister(RegisterAddress::TemperatureRegister);
+            LOG_DEBUG << "reached inside cont mode";
             if (error != NoErrors) {
                 return etl::make_pair(error, NULL);
             }
@@ -172,10 +186,17 @@ namespace TMP117 {
         }
 
         // One-shot mode
-        if (((reg.value() >> 10) & 0x3) == 0x2) {
-            // error = TMP117::writeRegister(RegisterAddress::EEPROM1, reg.value() || 0xC00);
-            // One-shot ongoing but data not ready yet
+        if (((reg.value() >> 10) & 0x3) == 0x3) {
+            LOG_DEBUG << "reached inside one-shot mode";
+            // Set MOD[1:0] bits to 11,in order initiate one-shot conversion
+            auto[error, config] = readRegister(RegisterAddress::ConfigurationRegister);
+            if (error != NoErrors){
+                return etl::make_pair(error, NULL);
+            }
 
+            error = TMP117::writeRegister(RegisterAddress::ConfigurationRegister, config.value() & 0xC00);
+
+            // One-shot ongoing but data not ready yet
             uint16_t timeout = MaxTimeoutDelay;
 
             while (timeout > 0) {
@@ -186,6 +207,7 @@ namespace TMP117 {
                     return etl::make_pair(error, NULL);
                 }
 
+                // check data ready flag
                 if (reg.value() & 0x2000) {
                     auto [error, reg] = readRegister(RegisterAddress::TemperatureRegister);
                     if (error != NoErrors) {
@@ -198,11 +220,12 @@ namespace TMP117 {
                     );
                 }
             }
-            return etl::make_pair(
-                    Timeout,
-                    NULL
-            );
+
         }
+        return etl::make_pair(
+                Timeout,
+                NULL
+        );
     }
 
     etl::pair<Error, uint16_t> TMP117::getDeviceID() {
