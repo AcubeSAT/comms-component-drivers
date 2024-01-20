@@ -4,25 +4,23 @@
 #include <cstdint>
 #include "main.h"
 
-namespace PSU {
-
-    class PSU {
+class PSU {
     public:
 
-        static GPIO_TypeDef *p5vFPGApgPORT;
-        static uint16_t p5vFPGApgPIN;
+        GPIO_TypeDef *p5vFPGApgPORT;
+        uint16_t p5vFPGApgPIN;
 
-        static GPIO_TypeDef *p5vRFpgPORT;
-        static uint16_t p5vRFpgPIN;
+        GPIO_TypeDef *p5vRFpgPORT;
+        uint16_t p5vRFpgPIN;
 
-        static GPIO_TypeDef *p3v3RFenPORT;
-        static uint16_t p3v3RFpgPIN;
+        GPIO_TypeDef *p3v3RFenPORT;
+        uint16_t p3v3RFpgPIN;
 
-        static GPIO_TypeDef *p5vFPGAenPORT;
-        static uint16_t p5vFPGAenPIN;
+        GPIO_TypeDef *p5vFPGAenPORT;
+        uint16_t p5vFPGAenPIN;
 
-        static GPIO_TypeDef *p5vRFenPORT;
-        static uint16_t p5vRFenPIN;
+        GPIO_TypeDef *p5vRFenPORT;
+        uint16_t p5vRFenPIN;
         /**
          * @param p5vFPGApgPORT  P5V_FPGA_PG_PORT
          * @param p5vFPGApgPIN P5V_FPGA_PG_PIN
@@ -42,7 +40,7 @@ namespace PSU {
          *    , GPIOD, GPIO_PIN_8
          *    , GPIOE, GPIO_PIN_13
          */
-        PSU(GPIO_TypeDef *p5vFPGApgPORT, uint16_t p5vFPGApgPIN
+         PSU(GPIO_TypeDef *p5vFPGApgPORT, uint16_t p5vFPGApgPIN
             , GPIO_TypeDef *p5vRFpgPORT, uint16_t p5vRFpgPIN
             , GPIO_TypeDef *p3v3RFenPORT, uint16_t p3v3RFpgPIN
             , GPIO_TypeDef *p5vFPGAenPORT, uint16_t p5vFPGAenPIN
@@ -56,7 +54,7 @@ namespace PSU {
          *          This parameter can be one of GPIO_PIN_x where x can be (0..15).
          * @return True if Pin is OFF, otherwise False
          */
-        static bool isPinOff(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
+        bool isPinOff(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
 
         /**
          * @brief Sets given Pin to state SET
@@ -64,7 +62,7 @@ namespace PSU {
          * @param GPIO_Pin: specifies the port bit to be written.
          *          This parameter can be one of GPIO_PIN_x where x can be (0..15).
          */
-        static void enablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
+        void enablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
 
         /**
          * @brief Resets given Pin to state RESET
@@ -72,7 +70,7 @@ namespace PSU {
          * @param GPIO_Pin: specifies the port bit to be written.
          *          This parameter can be one of GPIO_PIN_x where x can be (0..15).
          */
-        static void disablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
+        void disablePartPSU(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
 
         /**
          * @brief Reads the Power-Good (PG) signals from 3 pins:
@@ -81,7 +79,7 @@ namespace PSU {
          * P3V3_RF_PG Pin PA9,
          * @return True if all 3 Pins are in SET state, otherwise False
          */
-        static bool PGread();
+        bool PGread();
 
         /**
          * @brief Solves the 'NO Power-Good Signal' error (PG signals went on RESET state) of the given PIN
@@ -89,6 +87,5 @@ namespace PSU {
          * @param GPIO_Pin: specifies the port bit to be written.
          *          This parameter can be one of GPIO_PIN_x where x can be (0..15).
          */
-        static void solvePGfault(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
-    };
-}
+        void solvePGfault(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
+};
