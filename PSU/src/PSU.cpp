@@ -48,6 +48,8 @@ void PSU::solvePGfault(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
     // hops into a loop until the PIN is ON
     while(isPinOff(GPIOx, GPIO_Pin)){
         disablePartPSU(GPIOx, GPIO_Pin);
+        HAL_Delay(1000); // TEST for exact need of delay time
         enablePartPSU(GPIOx, GPIO_Pin);
+        HAL_Delay(1000); // TEST for exact need of delay time
     }
 }
