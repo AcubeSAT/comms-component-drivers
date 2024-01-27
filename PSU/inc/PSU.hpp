@@ -22,7 +22,7 @@ class PSU {
         GPIO_TypeDef *p5vRFenPORT;
         uint16_t p5vRFenPIN;
         /**
-         * @param p5vFPGApgPORT  P5V_FPGA_PG_PORT
+         * @param p5vFPGApgPORT P5V_FPGA_PG_PORT
          * @param p5vFPGApgPIN P5V_FPGA_PG_PIN
          *
          * @param p5vRFpgPORT P5V_RF_PG_PORT
