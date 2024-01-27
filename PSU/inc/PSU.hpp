@@ -13,7 +13,7 @@ class PSU {
         GPIO_TypeDef *p5vRFpgPORT;
         uint16_t p5vRFpgPIN;
 
-        GPIO_TypeDef *p3v3RFenPORT;
+        GPIO_TypeDef *p3v3RFpgPORT;
         uint16_t p3v3RFpgPIN;
 
         GPIO_TypeDef *p5vFPGAenPORT;
@@ -24,12 +24,16 @@ class PSU {
         /**
          * @param p5vFPGApgPORT  P5V_FPGA_PG_PORT
          * @param p5vFPGApgPIN P5V_FPGA_PG_PIN
+         *
          * @param p5vRFpgPORT P5V_RF_PG_PORT
          * @param p5vRFpgPIN P5V_RF_PG_PIN
-         * @param p3v3RFenPORT P3V3_RF_PG_PORT
+         *
+         * @param p3v3RFpgPORT P3V3_RF_PG_PORT
          * @param p3v3RFpgPIN P3V3_RF_PG_PIN
+         *
          * @param p5vFPGAenPORT P5V_FPGA_EN_PORT
          * @param p5vFPGAenPIN P5V_FPGA_EN_PIN
+         *
          * @param p5vRFenPORT P5V_RF_EN_PORT
          * @param p5vRFenPIN P5V_RF_EN_PIN
          *
@@ -40,11 +44,9 @@ class PSU {
          *    , GPIOD, GPIO_PIN_8
          *    , GPIOE, GPIO_PIN_13
          */
-         PSU(GPIO_TypeDef *p5vFPGApgPORT, uint16_t p5vFPGApgPIN
-            , GPIO_TypeDef *p5vRFpgPORT, uint16_t p5vRFpgPIN
-            , GPIO_TypeDef *p3v3RFenPORT, uint16_t p3v3RFpgPIN
-            , GPIO_TypeDef *p5vFPGAenPORT, uint16_t p5vFPGAenPIN
-            , GPIO_TypeDef *p5vRFenPORT, uint16_t p5vRFenPIN);
+        PSU(GPIO_TypeDef *p5vFPGApgPORTx, uint16_t p5vFPGApgPINx, GPIO_TypeDef *p5vRFpgPORTx, uint16_t p5vRFpgPINx,
+            GPIO_TypeDef *p3v3RFpgPORTx, uint16_t p3v3RFpgPINx, GPIO_TypeDef *p5vFPGAenPORTx, uint16_t p5vFPGAenPINx,
+            GPIO_TypeDef *p5vRFenPORTx, uint16_t p5vRFenPINx);
 
 
         /**
