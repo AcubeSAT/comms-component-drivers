@@ -36,12 +36,9 @@ bool PSU::isPinOff(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
 }
 
 bool PSU::PGread() {
-    if ( isPinOff(p5vFPGApgPORT, p5vFPGApgPIN)
-         || isPinOff(p5vRFpgPORT, p5vRFpgPIN)
-         || isPinOff(p3v3RFpgPORT, p3v3RFpgPIN) )
-        return false;
-    else
-        return true;
+    return not (isPinOff(p5vFPGApgPORT, p5vFPGApgPIN) or
+                isPinOff(p5vRFpgPORT, p5vRFpgPIN) or
+                isPinOff(p3v3RFpgPORT, p3v3RFpgPIN) );
 }
 
 void PSU::solvePGfault(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
