@@ -1111,6 +1111,8 @@ public:
 	 */
 	void transmitBasebandPacketsRx(Transceiver transceiver, Error &err);
 
+    void transmitPacketsIQ(Transceiver transceiver, bool embeddedControl, Error &err);
+
 
 	uint8_t received_packet[2047];
     uint8_t energy_measurement = 0;
@@ -1132,6 +1134,10 @@ private:
     bool cca_ongoing;
     /// Flag for checking whether the AGC is locked
     bool agc_held;
+    /// Flag indicating that an IQ TX procedure is ongoing
+    bool iq_tx_ongoing;
+    /// Flag indicating that the IQ procedure is controlled manually or by the I/Q frame control bits
+    bool embedded_control;
 
 	SPI_HandleTypeDef *hspi;
 };

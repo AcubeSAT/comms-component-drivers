@@ -1318,6 +1318,33 @@ void AT86RF215::transmitBasebandPacketsRx(Transceiver transceiver, Error &err){
 	set_state(transceiver, State::RF_RX, err);
 }
 
+void AT86RF215::transmitPacketsIQ(Transceiver transceiver, bool embeddedControl, Error &err){
+    if (tx_ongoing || rx_ongoing){
+        err = Error::ONGOING_TRANSMISSION_RECEPTION;
+        return;
+    }
+
+    set_state(transceiver, State::RF_TRXOFF, err);
+    if (err != Error::NO_ERRORS) {
+        return;
+    }
+
+    uint8_t iqifc0 = spi_read_8(RegisterAddress::RF_IQIFC0, err);
+    if (embeddedControl){
+        // Set last bit to 1
+        spi_write_8(RegisterAddress::RF_IQIFC0, iqifc0 | 0x1, err);
+        embedded_control = true;
+    }
+    else {
+        // Set last bit to 0
+        spi_write_8(RegisterAddress::RF_IQIFC0, iqifc0 & 0b1110, err);
+        embedded_control = false;
+    }
+
+    iq_tx_ongoing = true;
+    set_state(transceiver, State::RF_TXPREP, err);
+}
+
 void AT86RF215::packetReception(Transceiver transceiver, Error &err){
 	if (err != Error::NO_ERRORS) {
 		return;
@@ -1857,6 +1884,7 @@ void AT86RF215::handle_irq(void) {
 
 	if ((irq & InterruptMask::IFSynchronization) != 0) {
 		// I/Q IF Synchronization Failure handling
+        // Notify that a retransmission is needed
 	}
 	if ((irq & InterruptMask::TransceiverError) != 0) {
 		// Transceiver Error handling
@@ -1879,6 +1907,13 @@ void AT86RF215::handle_irq(void) {
         }
         if (tx_ongoing){
             // Switch to TX state once the transceiver is ready to send
+            set_state(Transceiver::RF24, State::RF_TX, err);
+        }
+        if (iq_tx_ongoing && embedded_control) {
+            // States are changed automatically
+            // A command should be sent to the FPGA to start transmitting I/Q frames
+        }
+        if (iq_tx_ongoing && !embedded_control) {
             set_state(Transceiver::RF24, State::RF_TX, err);
         }
 
