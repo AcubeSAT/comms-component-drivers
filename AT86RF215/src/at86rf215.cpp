@@ -1239,27 +1239,7 @@ int8_t AT86RF215::get_receiver_energy_detection(Transceiver transceiver, Error &
 
 void AT86RF215::transmitBasebandPacketsTx(Transceiver transceiver,
         uint8_t *packet, uint16_t length, Error &err) {
-    RegisterAddress regtxflh;
-    RegisterAddress regtxfll;
-    RegisterAddress regfbtxs;
-    bool rx_ongoing;
-    bool tx_ongoing;
-
-    if (transceiver == RF09) {
-        regtxflh = BBC0_TXFLH;
-        regtxfll = BBC0_TXFLL;
-        regfbtxs = BBC0_FBTXS;
-        rx_ongoing = rx_ongoing09;
-        tx_ongoing = tx_ongoing09;
-    } else if (transceiver == RF24) {
-        regtxflh = BBC1_TXFLH;
-        regtxfll = BBC1_TXFLL;
-        regfbtxs = BBC1_FBTXS;
-        rx_ongoing = rx_ongoing24;
-        tx_ongoing = tx_ongoing24;
-    }
-
-    if (tx_ongoing or rx_ongoing){
+    if (tx_ongoing || rx_ongoing){
         err = Error::ONGOING_TRANSMISSION_RECEPTION;
         return;
     }
@@ -1267,6 +1247,20 @@ void AT86RF215::transmitBasebandPacketsTx(Transceiver transceiver,
     set_state(transceiver, State::RF_TRXOFF, err);
     if (err != Error::NO_ERRORS) {
         return;
+    }
+
+    RegisterAddress regtxflh;
+    RegisterAddress regtxfll;
+    RegisterAddress regfbtxs;
+
+    if (transceiver == RF09) {
+        regtxflh = BBC0_TXFLH;
+        regtxfll = BBC0_TXFLL;
+        regfbtxs = BBC0_FBTXS;
+    } else if (transceiver == RF24) {
+        regtxflh = BBC1_TXFLH;
+        regtxfll = BBC1_TXFLL;
+        regfbtxs = BBC1_FBTXS;
     }
 
     // write length to register
@@ -1287,20 +1281,10 @@ void AT86RF215::transmitBasebandPacketsTx(Transceiver transceiver,
 
     tx_ongoing = true;
     set_state(transceiver, State::RF_TXPREP, err);
+
 }
 
 void AT86RF215::clear_channel_assessment(Transceiver transceiver, Error &err){
-    bool rx_ongoing;
-    bool tx_ongoing;
-
-    if (transceiver == RF09) {
-        rx_ongoing = rx_ongoing09;
-        tx_ongoing = tx_ongoing09;
-    } else if (transceiver == RF24) {
-        rx_ongoing = rx_ongoing24;
-        tx_ongoing = tx_ongoing24;
-    }
-
     if (tx_ongoing or rx_ongoing){
         err = ONGOING_TRANSMISSION_RECEPTION;
 
@@ -1795,134 +1779,134 @@ void AT86RF215::handle_irq(void) {
     /* Sub 1-GHz Transceiver */
 
     // Radio IRQ
-    volatile uint8_t irq09 = spi_read_8(RegisterAddress::RF09_IRQS, err);
-    if ((irq09 & InterruptMask::IFSynchronization) != 0) {
+    volatile uint8_t irq = spi_read_8(RegisterAddress::RF09_IRQS, err);
+    if ((irq & InterruptMask::IFSynchronization) != 0) {
         // I/Q IF Synchronization Failure handling
     }
-    if ((irq09 & InterruptMask::TransceiverError) != 0) {
+    if ((irq & InterruptMask::TransceiverError) != 0) {
         // Transceiver Error handling
     }
-    if ((irq09 & InterruptMask::BatteryLow) != 0) {
+    if ((irq & InterruptMask::BatteryLow) != 0) {
         // Battery Low handling
     }
-    if ((irq09 & InterruptMask::EnergyDetectionCompletion) != 0) {
-        rx_ongoing09 = false;
+    if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
+        rx_ongoing = false;
         cca_ongoing = false;
         energy_measurement = get_receiver_energy_detection(Transceiver::RF09, err);
     }
-    if ((irq09 & InterruptMask::TransceiverReady) != 0) {
-        if (rx_ongoing09) {
+    if ((irq & InterruptMask::TransceiverReady) != 0) {
+        if (rx_ongoing) {
             // Switch to TX state once the transceiver is ready to send
             set_state(Transceiver::RF09, State::RF_RX, err);
             if (cca_ongoing) {
                 spi_write_8(RF09_EDC, 0x1, err);
             }
         }
-        if (tx_ongoing09){
+        if (tx_ongoing){
             // Switch to TX state once the transceiver is ready to send
             set_state(Transceiver::RF09, State::RF_TX, err);
         }
     }
-    if ((irq09 & InterruptMask::Wakeup) != 0) {
+    if ((irq & InterruptMask::Wakeup) != 0) {
         // Wakeup handling
     }
 
     //Baseband IRQ
-    irq09 = spi_read_8(RegisterAddress::BBC0_IRQS, err);
-    if ((irq09 & InterruptMask::FrameBufferLevelIndication) != 0) {
+    irq = spi_read_8(RegisterAddress::BBC0_IRQS, err);
+    if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
         // Frame Buffer Level Indication handling
     }
-    if ((irq09 & InterruptMask::AGCRelease) != 0) {
+    if ((irq & InterruptMask::AGCRelease) != 0) {
         // AGC Release handling
     }
-    if ((irq09 & InterruptMask::AGCHold) != 0) {
+    if ((irq & InterruptMask::AGCHold) != 0) {
         // AGC Hold handling
     }
-    if ((irq09 & InterruptMask::TransmitterFrameEnd) != 0) {
-        tx_ongoing09 = false;
+    if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
+        tx_ongoing = false;
     }
-    if ((irq09 & InterruptMask::ReceiverExtendMatch) != 0) {
+    if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
         // Receiver Extended Match handling
     }
-    if ((irq09 & InterruptMask::ReceiverAddressMatch) != 0) {
+    if ((irq & InterruptMask::ReceiverAddressMatch) != 0) {
         // Receiver Address Match handling
     }
-    if ((irq09 & InterruptMask::ReceiverFrameEnd) != 0) {
-        if (rx_ongoing09){
+    if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
+        if (rx_ongoing){
             packetReception(Transceiver::RF09, err);
-            rx_ongoing09 = false;
+            rx_ongoing = false;
         }
     }
-    if ((irq09 & InterruptMask::ReceiverFrameStart) != 0) {
-        rx_ongoing09  = true;
+    if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
+        rx_ongoing  = true;
     }
 
     /* 2.4 GHz Transceiver */
 
     // Radio IRQ
-    volatile uint8_t irq24 = spi_read_8(RegisterAddress::RF24_IRQS, err);
+    irq = spi_read_8(RegisterAddress::RF24_IRQS, err);
 
-    if ((irq24 & InterruptMask::IFSynchronization) != 0) {
+    if ((irq & InterruptMask::IFSynchronization) != 0) {
         // I/Q IF Synchronization Failure handling
     }
-    if ((irq24 & InterruptMask::TransceiverError) != 0) {
+    if ((irq & InterruptMask::TransceiverError) != 0) {
         // Transceiver Error handling
     }
-    if ((irq24 & InterruptMask::BatteryLow) != 0) {
+    if ((irq & InterruptMask::BatteryLow) != 0) {
         // Battery Low handling
     }
-    if ((irq24 & InterruptMask::EnergyDetectionCompletion) != 0) {
-        rx_ongoing24 = false;
+    if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
+        rx_ongoing = false;
         cca_ongoing = false;
         energy_measurement = get_receiver_energy_detection(Transceiver::RF24, err);
     }
-    if ((irq24 & InterruptMask::TransceiverReady) != 0) {
-        if (rx_ongoing24){
+    if ((irq & InterruptMask::TransceiverReady) != 0) {
+        if (rx_ongoing){
             // Switch to RX state once the transceiver is ready to receive
             set_state(Transceiver::RF24, State::RF_RX, err);
             if (cca_ongoing) {
                 spi_write_8(RF24_EDC, 0x1, err);
             }
         }
-        if (tx_ongoing24){
+        if (tx_ongoing){
             // Switch to TX state once the transceiver is ready to send
             set_state(Transceiver::RF24, State::RF_TX, err);
         }
 
     }
-    if ((irq24 & InterruptMask::Wakeup) != 0) {
+    if ((irq & InterruptMask::Wakeup) != 0) {
         // Wakeup handling
     }
 
     //Baseband IRQ
-    irq24 = spi_read_8(RegisterAddress::BBC0_IRQS, err);
-    if ((irq24 & InterruptMask::FrameBufferLevelIndication) != 0) {
+    irq = spi_read_8(RegisterAddress::BBC0_IRQS, err);
+    if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
         // Frame Buffer Level Indication handling
     }
-    if ((irq24 & InterruptMask::AGCRelease) != 0) {
+    if ((irq & InterruptMask::AGCRelease) != 0) {
         // AGC Release handling
     }
-    if ((irq24 & InterruptMask::AGCHold) != 0) {
+    if ((irq & InterruptMask::AGCHold) != 0) {
         agc_held = true;
     }
-    if ((irq24 & InterruptMask::TransmitterFrameEnd) != 0) {
-        tx_ongoing24 = false;
+    if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
+        tx_ongoing = false;
     }
-    if ((irq24 & InterruptMask::ReceiverExtendMatch) != 0) {
+    if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
         // Receiver Extended Match handling
     }
-    if ((irq24 & InterruptMask::ReceiverAddressMatch) != 0) {
+    if ((irq & InterruptMask::ReceiverAddressMatch) != 0) {
         // Receiver Address Match handling
     }
-    if ((irq24 & InterruptMask::ReceiverFrameEnd) != 0) {
-        if (rx_ongoing24){
+    if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
+        if (rx_ongoing){
             packetReception(Transceiver::RF24, err);
-            rx_ongoing24 = false;
+            rx_ongoing = false;
         }
     }
-    if ((irq24 & InterruptMask::ReceiverFrameStart) != 0) {
+    if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
         // Receiver Frame Start handling
-        rx_ongoing24 = true;
+        rx_ongoing = true;
     }
 
 }

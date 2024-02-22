@@ -40,8 +40,8 @@ public:
 	 *
 	 */
 	AT86RF215(SPI_HandleTypeDef *hspim, const AT86RF215Configuration&& config) :
-			hspi(hspim), config(std::move(config)), tx_ongoing09(false), tx_ongoing24(false),
-            rx_ongoing09(false), rx_ongoing24(false), agc_held(false) {
+			hspi(hspim), config(std::move(config)), tx_ongoing(false), rx_ongoing(false),
+			agc_held(false) {
 	};
 
 	/* Writes a byte to a specified address
@@ -1125,11 +1125,9 @@ private:
     void packetReception(Transceiver transceiver, Error &err);
 
     /// Flag indicating that a TX procedure is ongoing
-    bool tx_ongoing09;
-    bool tx_ongoing24;
+    bool tx_ongoing;
     /// Flag indicating that an RX procedure is ongoing
-    bool rx_ongoing09;
-    bool rx_ongoing24;
+    bool rx_ongoing;
     /// Flag indicating that the Clean Channel Assessment procedure is ongoing
     bool cca_ongoing;
     /// Flag for checking whether the AGC is locked
