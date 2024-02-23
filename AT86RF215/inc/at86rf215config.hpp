@@ -159,7 +159,7 @@ struct AT86RF215Configuration {
 	bool baseBandEnable09 = true;
 	bool baseBandEnable24 = true;
 	PhysicalLayerType physicalLayerType09 = PhysicalLayerType::BB_MRFSK;
-	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_OFF;
+	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_MRFSK;
 
 	// Enabled Interrupts
 

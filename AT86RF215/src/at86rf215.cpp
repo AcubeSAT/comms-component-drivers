@@ -1879,7 +1879,7 @@ void AT86RF215::handle_irq(void) {
     }
 
     //Baseband IRQ
-    irq = spi_read_8(RegisterAddress::BBC0_IRQS, err);
+    irq = spi_read_8(RegisterAddress::BBC1_IRQS, err);
     if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
         // Frame Buffer Level Indication handling
     }
