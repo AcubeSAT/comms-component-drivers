@@ -61,6 +61,7 @@ namespace TMP117 {
         ConversionMode conversionMode;
         uint8_t cycleTime;
         Averaging averaging;
+        float temperatureOffset;
         /**
          * 0: Alert Mode
          * 1: Therm Mode
