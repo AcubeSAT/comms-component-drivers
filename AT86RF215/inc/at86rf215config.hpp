@@ -112,8 +112,8 @@ struct AT86RF215Configuration {
 	bool ifInversion24 = false;
 	bool ifShift09 = false;
 	bool ifShift24 = false;
-//	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
-    ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW160KHZ_IF250KHZ;
+	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
+//    ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW160KHZ_IF250KHZ;
 
 	ReceiverBandwidth rxBandwidth24 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
 	RxRelativeCutoffFrequency rxRelativeCutoffFrequency09 =
@@ -130,8 +130,8 @@ struct AT86RF215Configuration {
 			AverageTimeNumberSamples::AVGS_8;
 	bool agcEnabled09 = true;
 	bool agcEnabled24 = true;
-//	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB42;
-    AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB24;
+	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB42;
+//    AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB24;
 
 	AutomaticGainTarget automaticGainControlTarget24 = AutomaticGainTarget::DB42;
 	uint8_t gainControlWord09 = 0x17;
