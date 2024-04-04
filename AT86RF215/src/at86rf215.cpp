@@ -1305,8 +1305,8 @@ void AT86RF215::transmitBasebandPacketsRx(Transceiver transceiver, Error &err){
     if (err != Error::NO_ERRORS) {
         return;
     }
-
-    set_state(transceiver, State::RF_RX, err);
+    rx_ongoing = true;
+    set_state(transceiver, State::RF_TXPREP, err);
 }
 
 void AT86RF215::packetReception(Transceiver transceiver, Error &err){
@@ -1316,16 +1316,16 @@ void AT86RF215::packetReception(Transceiver transceiver, Error &err){
 
     RegisterAddress regrxflh;
     RegisterAddress regrxfll;
-    RegisterAddress regfbtxs;
+    RegisterAddress regfbrxs;
 
     if (transceiver == RF09) {
         regrxflh = BBC0_RXFLH;
         regrxfll = BBC0_RXFLL;
-        regfbtxs = BBC0_FBTXS;
+        regfbrxs = BBC0_FBRXS;
     } else if (transceiver == RF24) {
         regrxflh = BBC1_RXFLH;
         regrxfll = BBC1_RXFLL;
-        regfbtxs = BBC1_FBTXS;
+        regfbrxs = BBC1_FBRXS;
     }
 
     // read length
@@ -1334,7 +1334,7 @@ void AT86RF215::packetReception(Transceiver transceiver, Error &err){
         return;
     }
 
-    spi_block_read_8(regfbtxs, length, received_packet, err);
+    spi_block_read_8(regfbrxs, length, received_packet, err);
 }
 
 
@@ -1790,13 +1790,21 @@ void AT86RF215::handle_irq(void) {
         // Battery Low handling
     }
     if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
+        // Reenable baseband Core after cca procedure
+        uint8_t temp = spi_read_8(BBC0_PC,err);
+        spi_write_8(BBC0_PC,temp & 0xFB,err);
         rx_ongoing = false;
         cca_ongoing = false;
         energy_measurement = get_receiver_energy_detection(Transceiver::RF09, err);
     }
     if ((irq & InterruptMask::TransceiverReady) != 0) {
         if (rx_ongoing) {
-            // Switch to TX state once the transceiver is ready to send
+            // Disable baseband core if there is a cca procedure
+            if (cca_ongoing){
+                uint8_t temp = spi_read_8(BBC0_PC,err);
+                spi_write_8(BBC0_PC,temp | 0x4,err);
+            }
+            // Switch to RX state once the transceiver is ready to receive
             set_state(Transceiver::RF09, State::RF_RX, err);
             if (cca_ongoing) {
                 spi_write_8(RF09_EDC, 0x1, err);
@@ -1832,13 +1840,16 @@ void AT86RF215::handle_irq(void) {
         // Receiver Address Match handling
     }
     if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
+        got_rxfs = true;
         if (rx_ongoing){
             packetReception(Transceiver::RF09, err);
             rx_ongoing = false;
         }
     }
     if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
-        rx_ongoing  = true;
+        got_rxfs = true;
+        // This might be unnecessary
+        // rx_ongoing  = true;
     }
 
     /* 2.4 GHz Transceiver */
@@ -1856,12 +1867,20 @@ void AT86RF215::handle_irq(void) {
         // Battery Low handling
     }
     if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
+        // Reenable baseband core after cca procedure
+        uint8_t temp = spi_read_8(BBC1_PC,err);
+        spi_write_8(BBC1_PC,temp & 0xFB,err);
         rx_ongoing = false;
         cca_ongoing = false;
         energy_measurement = get_receiver_energy_detection(Transceiver::RF24, err);
     }
     if ((irq & InterruptMask::TransceiverReady) != 0) {
         if (rx_ongoing){
+            // Disable the baseband core if there is a cca procedure
+            if (cca_ongoing){
+                uint8_t temp = spi_read_8(BBC1_PC,err);
+                spi_write_8(BBC1_PC,temp | 0x4,err);
+            }
             // Switch to RX state once the transceiver is ready to receive
             set_state(Transceiver::RF24, State::RF_RX, err);
             if (cca_ongoing) {
@@ -1906,7 +1925,8 @@ void AT86RF215::handle_irq(void) {
     }
     if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
         // Receiver Frame Start handling
-        rx_ongoing = true;
+        // This might be unnecessary
+        //rx_ongoing = true;
     }
 
 }

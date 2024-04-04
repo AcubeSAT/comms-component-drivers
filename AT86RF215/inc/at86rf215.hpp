@@ -1113,7 +1113,9 @@ public:
 
 
 	uint8_t received_packet[2047];
-    uint8_t energy_measurement = 0;
+    int8_t energy_measurement = 0;
+    bool got_rxfs = false;
+    bool got_rxfe = false;
 
 private:
 
