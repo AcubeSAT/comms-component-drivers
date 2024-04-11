@@ -511,20 +511,57 @@ TxRelativeCutoffFrequency AT86RF215::get_relative_cutoff_freq(
     return static_cast<TxRelativeCutoffFrequency>(dfe);
 }
 
-void AT86RF215::set_direct_modulation(Transceiver transceiver, bool dmod,
-        Error &err) {
+void AT86RF215::set_direct_modulation(Transceiver transceiver, bool dmod, bool enablePE, uint8_t configPE0,
+        uint8_t  configPE1, uint8_t configPE2, Error &err) {
     RegisterAddress regtxdfe;
+    RegisterAddress regfskdm;
+    RegisterAddress regoqpskc0;
+    RegisterAddress regfskpe0;
+    RegisterAddress regfskpe1;
+    RegisterAddress regfskpe2;
+
     // TODO: Also set FSKDM.EN and OQPSKC0.DN once implemented
     if (transceiver == RF09) {
         regtxdfe = RF09_TXDFE;
+        regfskdm = BBC0_FSKDM;
+        regoqpskc0 = BBC0_OQPSKC0;
+        if (enablePE){
+            regfskpe0 = BBC0_FSKPE0;
+            regfskpe1 = BBC0_FSKPE1;
+            regfskpe2 = BBC0_FSKPE2;
+        }
     } else if (transceiver == RF24) {
         regtxdfe = RF24_TXDFE;
+        regfskdm = BBC1_FSKDM;
+        regoqpskc0 = BBC1_OQPSKC0;
+        if (enablePE){
+            regfskpe0 = BBC1_FSKPE0;
+            regfskpe1 = BBC1_FSKPE1;
+            regfskpe2 = BBC1_FSKPE2;
+        }
     }
 
+    // enable direct modulation
     uint8_t dfe = spi_read_8(regtxdfe, err) & 0xEF;
     if (err != Error::NO_ERRORS)
         return;
     spi_write_8(regtxdfe, dfe | (static_cast<uint8_t>(dmod) << 4), err);
+
+    // enable fsk modulation and configure pre-emphasis filter
+    spi_write_8(regfskdm, (static_cast<uint8_t>((enablePE << 1) | dmod )), err);
+    if (enablePE){
+        spi_write_8(regfskpe0, configPE0, err);
+        spi_write_8(regfskpe1, configPE1, err);
+        spi_write_8(regfskpe2, configPE2, err);
+    }
+
+    // enable oqpsk direct modulation
+    uint8_t oqpskc0 = spi_read_8(regoqpskc0,err) & 0xEF;
+    if (err != Error::NO_ERRORS){
+        return;
+    }
+    spi_write_8(regoqpskc0, oqpskc0 | (static_cast<uint8_t>(dmod) << 4), err);
+
 }
 
 bool AT86RF215::get_direct_modulation(Transceiver transceiver, Error &err) {
@@ -1548,7 +1585,8 @@ void AT86RF215::setup_rx_frontend(Transceiver transceiver, bool if_inversion,
 
     // Set RFn_AGCC
     reg = (static_cast<uint8_t>(agc_input) << 6)
-            | (static_cast<uint8_t>(agc_avg_sample) << 4);
+          | (static_cast<uint8_t>(agc_avg_sample) << 4)
+          | (static_cast<uint8_t>(agc_enabled));
     spi_write_8(regagcc, reg, err);
     if (err != Error::NO_ERRORS) {
         return;
@@ -1806,6 +1844,7 @@ void AT86RF215::handle_irq(void) {
             }
             // Switch to RX state once the transceiver is ready to receive
             set_state(Transceiver::RF09, State::RF_RX, err);
+
             if (cca_ongoing) {
                 spi_write_8(RF09_EDC, 0x1, err);
             }
@@ -1840,7 +1879,7 @@ void AT86RF215::handle_irq(void) {
         // Receiver Address Match handling
     }
     if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
-        got_rxfs = true;
+        got_rxfe = true;
         if (rx_ongoing){
             packetReception(Transceiver::RF09, err);
             rx_ongoing = false;
@@ -1867,7 +1906,7 @@ void AT86RF215::handle_irq(void) {
         // Battery Low handling
     }
     if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
-        // Reenable baseband core after cca procedure
+        // Re-enable baseband core after cca procedure
         uint8_t temp = spi_read_8(BBC1_PC,err);
         spi_write_8(BBC1_PC,temp & 0xFB,err);
         rx_ongoing = false;
@@ -1883,6 +1922,7 @@ void AT86RF215::handle_irq(void) {
             }
             // Switch to RX state once the transceiver is ready to receive
             set_state(Transceiver::RF24, State::RF_RX, err);
+
             if (cca_ongoing) {
                 spi_write_8(RF24_EDC, 0x1, err);
             }
@@ -1918,12 +1958,14 @@ void AT86RF215::handle_irq(void) {
         // Receiver Address Match handling
     }
     if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
+        got_rxfe = true;
         if (rx_ongoing){
             packetReception(Transceiver::RF24, err);
             rx_ongoing = false;
         }
     }
     if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
+        got_rxfs = true;
         // Receiver Frame Start handling
         // This might be unnecessary
         //rx_ongoing = true;

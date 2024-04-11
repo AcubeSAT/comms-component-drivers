@@ -160,8 +160,16 @@ struct AT86RF215Configuration {
 	bool baseBandEnable24 = true;
 	PhysicalLayerType physicalLayerType09 = PhysicalLayerType::BB_MRFSK;
 	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_MRFSK;
+        bool enablePE09 = false;
+        bool enablePE24 = false;
+        uint8_t configPE0_09 = 0x13;  // preemphasis filter settings (table 6-57)
+        uint8_t configPE1_09 = 0x29;
+        uint8_t configPE2_09 = 0xC7;
+        uint8_t configPE0_24 = 0x13;
+        uint8_t configPE1_24 = 0x29;
+        uint8_t configPE2_24 = 0xC7;
 
-	// Enabled Interrupts
+    // Enabled Interrupts
 
 	// Baseband IRQ
     // All interrupts enabled
