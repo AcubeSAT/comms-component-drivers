@@ -1845,6 +1845,9 @@ void AT86RF215::handle_irq(void) {
             // Switch to RX state once the transceiver is ready to receive
             set_state(Transceiver::RF09, State::RF_RX, err);
 
+            if (err!=NO_ERRORS)
+                got_stateRX = true;
+
             if (cca_ongoing) {
                 spi_write_8(RF09_EDC, 0x1, err);
             }
@@ -1880,6 +1883,7 @@ void AT86RF215::handle_irq(void) {
     }
     if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
         got_rxfe = true;
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,GPIO_PIN_SET);
         if (rx_ongoing){
             packetReception(Transceiver::RF09, err);
             rx_ongoing = false;
@@ -1887,6 +1891,8 @@ void AT86RF215::handle_irq(void) {
     }
     if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
         got_rxfs = true;
+//        HAL_Delay(10);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,GPIO_PIN_SET);
         // This might be unnecessary
         // rx_ongoing  = true;
     }

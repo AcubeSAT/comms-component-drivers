@@ -1121,6 +1121,7 @@ public:
     int8_t energy_measurement = 0;
     bool got_rxfs = false;
     bool got_rxfe = false;
+    bool got_stateRX = false;
 
 private:
 
