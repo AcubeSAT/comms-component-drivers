@@ -67,28 +67,28 @@ struct AT86RF215Configuration {
 
 	// TX Front-end
 	PowerAmplifierRampTime powerAmplifierRampTime09 =
-			PowerAmplifierRampTime::RF_PARAMP4U;
+			PowerAmplifierRampTime::RF_PARAMP32U;
 	PowerAmplifierRampTime powerAmplifierRampTime24 =
 			PowerAmplifierRampTime::RF_PARAMP4U;
 	TransmitterCutOffFrequency transmitterCutOffFrequency09 =
-			TransmitterCutOffFrequency::RF_FLC500KHZ;
+			TransmitterCutOffFrequency::RF_FLC80KHZ;
 	TransmitterCutOffFrequency transmitterCutOffFrequency24 =
 			TransmitterCutOffFrequency::RF_FLC500KHZ;
 	TxRelativeCutoffFrequency txRelativeCutoffFrequency09 =
-			TxRelativeCutoffFrequency::FCUT_025;
+			TxRelativeCutoffFrequency::FCUT_0375;
 	TxRelativeCutoffFrequency txRelativeCutoffFrequency24 =
 			TxRelativeCutoffFrequency::FCUT_025;
-	bool directModulation09 = false;
+	bool directModulation09 = false;                  // Direct modulation must be kept off
 	bool directModulation24 = false;
-	TransmitterSampleRate transceiverSampleRate09 =
-			TransmitterSampleRate::FS_4000;
+	TransmitterSampleRate transceiverSampleRate09 =   // Do not change this
+			TransmitterSampleRate::FS_400;
 	TransmitterSampleRate transceiverSampleRate24 =
 			TransmitterSampleRate::FS_4000;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl09 =
 			PowerAmplifierCurrentControl::PA_NO;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl24 =
 			PowerAmplifierCurrentControl::PA_NO;
-	uint8_t txOutPower09 = 0x1F;
+	uint8_t txOutPower09 = 0x0;
 	uint8_t txOutPower24 = 0x1F;
 	ExternalLNABypass externalLNABypass09 = ExternalLNABypass::FALSE;
 	ExternalLNABypass externalLNABypass24 = ExternalLNABypass::FALSE;
@@ -112,15 +112,13 @@ struct AT86RF215Configuration {
 	bool ifInversion24 = false;
 	bool ifShift09 = false;
 	bool ifShift24 = false;
-	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
-//    ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW160KHZ_IF250KHZ;
-
+	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW200KHZ_IF250KHZ;
 	ReceiverBandwidth rxBandwidth24 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
 	RxRelativeCutoffFrequency rxRelativeCutoffFrequency09 =
-			RxRelativeCutoffFrequency::FCUT_025;
+			RxRelativeCutoffFrequency::FCUT_0375;
 	RxRelativeCutoffFrequency rxRelativeCutoffFrequency24 =
 			RxRelativeCutoffFrequency::FCUT_025;
-	ReceiverSampleRate receiverSampleRate09 = ReceiverSampleRate::FS_4000;
+	ReceiverSampleRate receiverSampleRate09 = ReceiverSampleRate::FS_400;  // Do not change this
 	ReceiverSampleRate receiverSampleRate24 = ReceiverSampleRate::FS_4000;
 	bool agcInput09 = false;
 	bool agcInput24 = false;
@@ -130,11 +128,9 @@ struct AT86RF215Configuration {
 			AverageTimeNumberSamples::AVGS_8;
 	bool agcEnabled09 = true;
 	bool agcEnabled24 = true;
-	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB42;
-//    AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB24;
-
+	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB30;
 	AutomaticGainTarget automaticGainControlTarget24 = AutomaticGainTarget::DB42;
-	uint8_t gainControlWord09 = 0x17;
+	uint8_t gainControlWord09 = 0x23;
 	uint8_t gainControlWord24 = 0x17;
 
 	// IQ Interface
@@ -160,14 +156,14 @@ struct AT86RF215Configuration {
 	bool baseBandEnable24 = false;
 	PhysicalLayerType physicalLayerType09 = PhysicalLayerType::BB_MRFSK;
 	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_MRFSK;
-        bool enablePE09 = false;
-        bool enablePE24 = false;
-        uint8_t configPE0_09 = 0x13;  // preemphasis filter settings (table 6-57)
-        uint8_t configPE1_09 = 0x29;
-        uint8_t configPE2_09 = 0xC7;
-        uint8_t configPE0_24 = 0x13;
-        uint8_t configPE1_24 = 0x29;
-        uint8_t configPE2_24 = 0xC7;
+    bool enablePE09 = false;      // Relevant when direct modulation is on. Keep them false.
+    bool enablePE24 = false;
+    uint8_t configPE0_09 = 0x13;  // preemphasis filter settings (table 6-57)
+    uint8_t configPE1_09 = 0x29;
+    uint8_t configPE2_09 = 0xC7;
+    uint8_t configPE0_24 = 0x13;
+    uint8_t configPE1_24 = 0x29;
+    uint8_t configPE2_24 = 0xC7;
 
     // Enabled Interrupts
 
