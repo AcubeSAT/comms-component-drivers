@@ -1331,13 +1331,13 @@ void AT86RF215::transmitPacketsIQ(Transceiver transceiver, bool embeddedControl,
 
     uint8_t iqifc0 = spi_read_8(RegisterAddress::RF_IQIFC0, err);
     if (embeddedControl){
-        // Set last bit to 1
-        spi_write_8(RegisterAddress::RF_IQIFC0, iqifc0 | 0x1, err);
+        // Set last two bits to 0b11, IEEE LVDS mode and enabled embedded control
+        spi_write_8(RegisterAddress::RF_IQIFC0, iqifc0 | 0b11, err);
         embedded_control = true;
     }
     else {
-        // Set last bit to 0
-        spi_write_8(RegisterAddress::RF_IQIFC0, iqifc0 & 0b1110, err);
+        // Set last two bits to 0b10, IEEE LVDS mode and disabled embedded control
+        spi_write_8(RegisterAddress::RF_IQIFC0, iqifc0 & 0b11111100, err);
         embedded_control = false;
     }
 
