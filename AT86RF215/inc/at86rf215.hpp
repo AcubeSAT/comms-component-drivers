@@ -358,15 +358,20 @@ public:
 	TxRelativeCutoffFrequency get_relative_cutoff_freq(Transceiver transceiver,
 			Error &err);
 
-	/*
-	 * Set whether direct modulation is used in the TX chain.
-	 * Only available for baseband FSK and OQPSK)
-	 *
-	 * @param transceiver		Specifies the transceiver used
-	 * @oaram dmod				Indicates whether direct modulation is used
-	 * @param err				Pointer to raised error
-	 */
-	void set_direct_modulation(Transceiver transceiver, bool dmod, Error &err);
+    /*
+     * Set whether direct modulation is used in the TX chain.
+     * Only available for baseband FSK and OQPSK)
+     * Look table 6-57 for fsk pre-emphasis configuration values
+     *
+     * @param transceiver		Specifies the transceiver used
+     * @oaram dmod				Indicates whether direct modulation is used
+     * @param enablePE          Indicates whether preemphasis filetring is used (relevant for fsk only)
+     * @param configPE0         Config information for  BBCn_FSKPE0
+     * @param configPE1         Config information for  BBCn_FSKPE1
+     * @param configPE2         Config information for  BBCn_FSKPE2
+     * @param err				Pointer to raised error
+     */
+    void set_direct_modulation(Transceiver transceiver, bool dmod, bool enablePE, uint8_t configPE0, uint8_t  configPE1, uint8_t configPE2, Error &err);
 
 	/*
 	 * Get whether direct modulation is used in the TX chain.
@@ -851,7 +856,7 @@ public:
 	 * @param err				Pointer to raised error
 	 * @return rssi				Received Signal Strength
 	 */
-	uint8_t get_rssi(Transceiver transceiver, Error &err);
+	int8_t get_rssi(Transceiver transceiver, Error &err);
 
 	/*
 	 * Set receiver energy detection average duration given by df*dtb
@@ -1115,7 +1120,10 @@ public:
 
 
 	uint8_t received_packet[2047];
-    uint8_t energy_measurement = 0;
+    int8_t energy_measurement = 0;
+    bool got_rxfs = false;
+    bool got_rxfe = false;
+    bool got_stateRX = false;
 
 private:
 
