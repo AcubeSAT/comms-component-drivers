@@ -1872,7 +1872,7 @@ void AT86RF215::handle_irq(void) {
             // Switch to RX state once the transceiver is ready to receive
             set_state(Transceiver::RF09, State::RF_RX, err);
 
-            if (err!=NO_ERRORS)
+            if (err == NO_ERRORS)
                 got_stateRX = true;
 
             if (cca_ongoing) {

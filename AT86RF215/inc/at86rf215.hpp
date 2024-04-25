@@ -40,7 +40,7 @@ public:
 	 *
 	 */
 	AT86RF215(SPI_HandleTypeDef *hspim, const AT86RF215Configuration&& config) :
-			hspi(hspim), config(std::move(config)), tx_ongoing(false), rx_ongoing(false),
+			hspi(hspim), config(std::move(config)), /*tx_ongoing(false),*/ rx_ongoing(false),
 			agc_held(false) {
 	};
 
@@ -1135,7 +1135,7 @@ private:
     void packetReception(Transceiver transceiver, Error &err);
 
     /// Flag indicating that a TX procedure is ongoing
-    bool tx_ongoing;
+    static inline bool tx_ongoing = false;
     /// Flag indicating that an RX procedure is ongoing
     bool rx_ongoing;
     /// Flag indicating that the Clean Channel Assessment procedure is ongoing

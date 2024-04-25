@@ -153,7 +153,7 @@ struct AT86RF215Configuration {
 	FrameCheckSequenceType frameCheckSequenceType09 = FrameCheckSequenceType::FCS_32;
 	FrameCheckSequenceType frameCheckSequenceType24 = FrameCheckSequenceType::FCS_32;
 	bool baseBandEnable09 = true;
-	bool baseBandEnable24 = false;
+	bool baseBandEnable24 = true;
 	PhysicalLayerType physicalLayerType09 = PhysicalLayerType::BB_MRFSK;
 	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_MRFSK;
     bool enablePE09 = false;      // Relevant when direct modulation is on. Keep them false.
