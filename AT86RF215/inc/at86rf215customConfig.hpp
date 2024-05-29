@@ -7,15 +7,24 @@
  *  Contains custom configuration
  */
 namespace AT86RF215{
+    constexpr static uint32_t FrequencyUHF = 436500;
+    constexpr static uint32_t FrequencyS = 2425000;
+
 struct AT86RF215CustomConfiguration : public AT86RF215DefaultConfiguration{
     AT86RF215CustomConfiguration() { // Add custom settings here
         // Crystal Oscillator
         fastStartUp = false;
 
         // PLL
-        pllFrequency09 = 0x8D20;
-        pllFrequency24 = 0x0CF8;
-        pllChannelNumber09 = 0x0003;
+        // Frequencies are configures using Fine Resolution Channel Scheme CNM.CM=1 (section 6.3.2)
+        pllFrequency09 = ((FrequencyUHF - 377000) * 65536 / 6500) >> 8;
+        pllChannelNumber09 = ((FrequencyUHF - 377000) * 65536 / 6500) & 0xFF;
+        pllChannelMode09 = PLLChannelMode::FineResolution450;
+
+        pllFrequency24 = ((FrequencyS - 377000) * 65536 / 6500) >> 8;
+        pllChannelNumber24 = ((FrequencyS - 377000) * 65536 / 6500) & 0xFF;
+        pllChannelMode24 = PLLChannelMode::FineResolution2443;
+
         channelSpacing09 =  0x30;
 
         // TX Front-end

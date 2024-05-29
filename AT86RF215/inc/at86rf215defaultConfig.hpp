@@ -13,8 +13,6 @@ struct AT86RF215DefaultConfiguration {
 			ReceiverEnergyDetectionAveragingDuration::REDAD_8U;
 	ReceiverBandwidth receiverBandwidth =
 			ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
-//	RxRelativeCutoffFrequency rxRelativeCutoffFrequency =
-//			RxRelativeCutoffFrequency::FCUT_025;
     RxRelativeCutoffFrequency rxRelativeCutoffFrequency =
             RxRelativeCutoffFrequency::FCUT_0375;
 
