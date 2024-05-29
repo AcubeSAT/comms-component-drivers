@@ -3,9 +3,12 @@
 
 #include "at86rf215definitions.hpp"
 
+/**
+ *  Contains default register configuration
+ */
 namespace AT86RF215 {
 
-struct AT86RF215Configuration {
+struct AT86RF215DefaultConfiguration {
 	ReceiverEnergyDetectionAveragingDuration receiverEnergyDetectionAveragingDuration =
 			ReceiverEnergyDetectionAveragingDuration::REDAD_8U;
 	ReceiverBandwidth receiverBandwidth =

@@ -2,7 +2,8 @@
 
 #include <at86rf215definitions.hpp>
 #include "stm32h7xx_hal.h"
-#include "at86rf215config.hpp"
+#include "at86rf215defaultConfig.hpp"
+#include "at86rf215customConfig.hpp"
 #include <utility>
 
 const uint16_t TIMEOUT = 1000;
@@ -39,7 +40,7 @@ public:
 	 * @param hspi: pointer to the SPI_HandleTypeDef responsible for configuring the SPI.
 	 *
 	 */
-	AT86RF215(SPI_HandleTypeDef *hspim, const AT86RF215Configuration&& config) :
+	AT86RF215(SPI_HandleTypeDef *hspim, const AT86RF215CustomConfiguration&& config) :
 			hspi(hspim), config(std::move(config)), tx_ongoing(false), rx_ongoing(false),
 			agc_held(false) {
 	};
@@ -1093,7 +1094,7 @@ public:
     void clear_channel_assessment(Transceiver transceiver, Error &err);
 
 
-    AT86RF215Configuration config;
+    AT86RF215CustomConfiguration config;
 
 	/**
 	 * Begins transmitting operations for Tx packet and automatically sets the `tx_ongoing` flag to inhibit conflicting
