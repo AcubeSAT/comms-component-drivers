@@ -21,8 +21,8 @@ struct AT86RF215CustomConfiguration : public AT86RF215DefaultConfiguration{
         pllChannelNumber09 = ((FrequencyUHF - 377000) * 65536 / 6500) & 0xFF;
         pllChannelMode09 = PLLChannelMode::FineResolution450;
 
-        pllFrequency24 = ((FrequencyS - 377000) * 65536 / 6500) >> 8;
-        pllChannelNumber24 = ((FrequencyS - 377000) * 65536 / 6500) & 0xFF;
+        pllFrequency24 = ((FrequencyS - 2366000) * 65536 / 6500) >> 8;
+        pllChannelNumber24 = ((FrequencyS - 2366000) * 65536 / 6500) & 0xFF;
         pllChannelMode24 = PLLChannelMode::FineResolution2443;
 
         channelSpacing09 =  0x30;
