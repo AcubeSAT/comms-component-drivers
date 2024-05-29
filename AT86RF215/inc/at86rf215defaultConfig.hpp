@@ -43,7 +43,7 @@ struct AT86RF215DefaultConfiguration {
 
 	// Crystal oscillator
 	CrystalTrim crystalTrim = CrystalTrim::TRIM_00;
-	bool fastStartUp = false;
+	bool fastStartUp = true;
 
 	// RSSI
 	EnergyDetectionTimeBasis energyDetectionBasis09 =
@@ -56,42 +56,42 @@ struct AT86RF215DefaultConfiguration {
 	uint8_t energyDetectFactor24 = 0x10;
 
 	// PLL
-	uint16_t pllFrequency09 = 0x8D20;
-	uint16_t pllFrequency24 = 0x0CF8;
-	uint16_t pllChannelNumber09 = 0x0003;
+	uint16_t pllFrequency09 = 0x8CF8;
+	uint16_t pllFrequency24 = 0x8CF8;
+	uint16_t pllChannelNumber09 = 0x0000;
 	uint16_t pllChannelNumber24 = 0x0000;
 	PLLChannelMode pllChannelMode09 = PLLChannelMode::IEECompliant;
 	PLLChannelMode pllChannelMode24 = PLLChannelMode::IEECompliant;
 	PLLBandwidth pllBandwidth09 = PLLBandwidth::BWDefault;
 	PLLBandwidth pllBandwidth24 = PLLBandwidth::BWDefault;
-	uint8_t channelSpacing09 =  0x30;
+	uint8_t channelSpacing09 =  0x08;
 	uint8_t channelSpacing24 =  0x08;
 
 
 	// TX Front-end
 	PowerAmplifierRampTime powerAmplifierRampTime09 =
-			PowerAmplifierRampTime::RF_PARAMP32U;
+			PowerAmplifierRampTime::RF_PARAMP4U;
 	PowerAmplifierRampTime powerAmplifierRampTime24 =
 			PowerAmplifierRampTime::RF_PARAMP4U;
 	TransmitterCutOffFrequency transmitterCutOffFrequency09 =
-			TransmitterCutOffFrequency::RF_FLC80KHZ;
+			TransmitterCutOffFrequency::RF_FLC500KHZ;
 	TransmitterCutOffFrequency transmitterCutOffFrequency24 =
 			TransmitterCutOffFrequency::RF_FLC500KHZ;
 	TxRelativeCutoffFrequency txRelativeCutoffFrequency09 =
-			TxRelativeCutoffFrequency::FCUT_0375;
+			TxRelativeCutoffFrequency::FCUT_025;
 	TxRelativeCutoffFrequency txRelativeCutoffFrequency24 =
 			TxRelativeCutoffFrequency::FCUT_025;
 	bool directModulation09 = false;                  // Direct modulation must be kept off
 	bool directModulation24 = false;
-	TransmitterSampleRate transceiverSampleRate09 =   // Do not change this
-			TransmitterSampleRate::FS_400;
+	TransmitterSampleRate transceiverSampleRate09 =
+			TransmitterSampleRate::FS_4000;
 	TransmitterSampleRate transceiverSampleRate24 =
 			TransmitterSampleRate::FS_4000;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl09 =
 			PowerAmplifierCurrentControl::PA_NO;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl24 =
 			PowerAmplifierCurrentControl::PA_NO;
-	uint8_t txOutPower09 = 0x0;
+	uint8_t txOutPower09 = 0x1F;
 	uint8_t txOutPower24 = 0x1F;
 	ExternalLNABypass externalLNABypass09 = ExternalLNABypass::FALSE;
 	ExternalLNABypass externalLNABypass24 = ExternalLNABypass::FALSE;
@@ -115,13 +115,13 @@ struct AT86RF215DefaultConfiguration {
 	bool ifInversion24 = false;
 	bool ifShift09 = false;
 	bool ifShift24 = false;
-	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW200KHZ_IF250KHZ;
+	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
 	ReceiverBandwidth rxBandwidth24 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
 	RxRelativeCutoffFrequency rxRelativeCutoffFrequency09 =
-			RxRelativeCutoffFrequency::FCUT_0375;
+			RxRelativeCutoffFrequency::FCUT_025;
 	RxRelativeCutoffFrequency rxRelativeCutoffFrequency24 =
 			RxRelativeCutoffFrequency::FCUT_025;
-	ReceiverSampleRate receiverSampleRate09 = ReceiverSampleRate::FS_400;  // Do not change this
+	ReceiverSampleRate receiverSampleRate09 = ReceiverSampleRate::FS_4000;
 	ReceiverSampleRate receiverSampleRate24 = ReceiverSampleRate::FS_4000;
 	bool agcInput09 = false;
 	bool agcInput24 = false;
@@ -132,8 +132,8 @@ struct AT86RF215DefaultConfiguration {
 	bool agcEnabled09 = true;
 	bool agcEnabled24 = true;
 	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB30;
-	AutomaticGainTarget automaticGainControlTarget24 = AutomaticGainTarget::DB42;
-	uint8_t gainControlWord09 = 0x23;
+	AutomaticGainTarget automaticGainControlTarget24 = AutomaticGainTarget::DB30;
+	uint8_t gainControlWord09 = 0x17;
 	uint8_t gainControlWord24 = 0x17;
 
 	// IQ Interface
@@ -149,57 +149,57 @@ struct AT86RF215DefaultConfiguration {
 
 	bool continuousTransmit09 = false;
 	bool continuousTransmit24 = false;
-	bool frameCheckSequenceFilter09 = false;
-	bool frameCheckSequenceFilter24 = false;
-	bool transmitterAutoFrameCheckSequence09 = false;
-	bool transmitterAutoFrameCheckSequence24 = false;
+	bool frameCheckSequenceFilter09 = true;
+	bool frameCheckSequenceFilter24 = true;
+	bool transmitterAutoFrameCheckSequence09 = true;
+	bool transmitterAutoFrameCheckSequence24 = true;
 	FrameCheckSequenceType frameCheckSequenceType09 = FrameCheckSequenceType::FCS_32;
 	FrameCheckSequenceType frameCheckSequenceType24 = FrameCheckSequenceType::FCS_32;
 	bool baseBandEnable09 = true;
-	bool baseBandEnable24 = false;
-	PhysicalLayerType physicalLayerType09 = PhysicalLayerType::BB_MRFSK;
-	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_MRFSK;
+	bool baseBandEnable24 = true;
+	PhysicalLayerType physicalLayerType09 = PhysicalLayerType::BB_OFF;
+	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_OFF;
     bool enablePE09 = false;      // Relevant when direct modulation is on. Keep them false.
     bool enablePE24 = false;
-    uint8_t configPE0_09 = 0x13;  // preemphasis filter settings (table 6-57)
-    uint8_t configPE1_09 = 0x29;
-    uint8_t configPE2_09 = 0xC7;
-    uint8_t configPE0_24 = 0x13;
-    uint8_t configPE1_24 = 0x29;
-    uint8_t configPE2_24 = 0xC7;
+    uint8_t configPE0_09 = 0x00;  // preemphasis filter settings (table 6-57)
+    uint8_t configPE1_09 = 0x00;
+    uint8_t configPE2_09 = 0x00;
+    uint8_t configPE0_24 = 0x00;
+    uint8_t configPE1_24 = 0x00;
+    uint8_t configPE2_24 = 0x00;
 
     // Enabled Interrupts
 
 	// Baseband IRQ
     // All interrupts enabled
-	bool frameBufferLevelIndication09 = true;
-	bool frameBufferLevelIndication24 = true;
-	bool agcRelease09 = true;
-	bool agcRelease24 = true;
-	bool agcHold09 = true;
-	bool agcHold24 = true;
-	bool transmitterFrameEnd09 = true;
-	bool transmitterFrameEnd24 = true;
-	bool receiverExtendedMatch09 = true;
-	bool receiverExtendedMatch24 = true;
-	bool receiverAddressMatch09 = true;
-	bool receiverAddressMatch24 = true;
-	bool receiverFrameEnd09 = true;
-	bool receiverFrameEnd24 = true;
-	bool receiverFrameStart09 = true;
-	bool receiverFrameStart24 = true;
+	bool frameBufferLevelIndication09 = false;
+	bool frameBufferLevelIndication24 = false;
+	bool agcRelease09 = false;
+	bool agcRelease24 = false;
+	bool agcHold09 = false;
+	bool agcHold24 = false;
+	bool transmitterFrameEnd09 = false;
+	bool transmitterFrameEnd24 = false;
+	bool receiverExtendedMatch09 = false;
+	bool receiverExtendedMatch24 = false;
+	bool receiverAddressMatch09 = false;
+	bool receiverAddressMatch24 = false;
+	bool receiverFrameEnd09 = false;
+	bool receiverFrameEnd24 = false;
+	bool receiverFrameStart09 = false;
+	bool receiverFrameStart24 = false;
 
 	// Radio IRQ
-	bool iqIfSynchronizationFailure09 = true;
-	bool iqIfSynchronizationFailure24 = true;
-	bool trasnceiverError09 = true;
-	bool trasnceiverError24 = true;
-	bool batteryLow09 = true;
-	bool batteryLow24 = true;
-	bool energyDetectionCompletion09 = true;
-	bool energyDetectionCompletion24 = true;
-	bool transceiverReady09 = true;
-	bool transceiverReady24 = true;
+	bool iqIfSynchronizationFailure09 = false;
+	bool iqIfSynchronizationFailure24 = false;
+	bool trasnceiverError09 = false;
+	bool trasnceiverError24 = false;
+	bool batteryLow09 = false;
+	bool batteryLow24 = false;
+	bool energyDetectionCompletion09 = false;
+	bool energyDetectionCompletion24 = false;
+	bool transceiverReady09 = false;
+	bool transceiverReady24 = false;
 	bool wakeup09 = true;
 	bool wakeup24 = true;
 
