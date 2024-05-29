@@ -1106,7 +1106,7 @@ public:
 	 * @param err				Pointer to raised error
 	 *
 	 */
-	void transmitBasebandPacketsTx(Transceiver transceiver, uint8_t *packet,
+	void basebandPacketsTx(Transceiver transceiver, uint8_t *packet,
 			uint16_t length, Error &err);
 
 	/**
@@ -1115,14 +1115,18 @@ public:
 	 * @param transceiver		Specifies the transceiver used
 	 * @param err				Pointer to raised error
 	 */
-	void transmitBasebandPacketsRx(Transceiver transceiver, Error &err);
+	void basebandPacketsRx(Transceiver transceiver, Error &err);
 
 
 	uint8_t received_packet[2047];
     int8_t energy_measurement = 0;
-    bool got_rxfs = false;
-    bool got_rxfe = false;
-    bool got_stateRX = false;
+
+    /**
+     * These flag variables signify to the user that a frame has arrived and can be read from received_packet.
+     * Once reading is complete, it must set again to false.
+     */
+    bool BBC0_got_rxfe = false;
+    bool BBC1_got_rxfe = false;
 
 private:
 

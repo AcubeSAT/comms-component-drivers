@@ -1274,7 +1274,7 @@ int8_t AT86RF215::get_receiver_energy_detection(Transceiver transceiver, Error &
 // read rssi
 // determine whether received signal strength is acceptable
 
-void AT86RF215::transmitBasebandPacketsTx(Transceiver transceiver,
+void AT86RF215::basebandPacketsTx(Transceiver transceiver,
         uint8_t *packet, uint16_t length, Error &err) {
     if (tx_ongoing || rx_ongoing){
         err = Error::ONGOING_TRANSMISSION_RECEPTION;
@@ -1337,7 +1337,7 @@ void AT86RF215::clear_channel_assessment(Transceiver transceiver, Error &err){
 }
 
 
-void AT86RF215::transmitBasebandPacketsRx(Transceiver transceiver, Error &err){
+void AT86RF215::basebandPacketsRx(Transceiver transceiver, Error &err){
     set_state(transceiver, State::RF_TRXOFF, err);
     if (err != Error::NO_ERRORS) {
         return;
@@ -1845,9 +1845,6 @@ void AT86RF215::handle_irq(void) {
             // Switch to RX state once the transceiver is ready to receive
             set_state(Transceiver::RF09, State::RF_RX, err);
 
-            if (err!=NO_ERRORS)
-                got_stateRX = true;
-
             if (cca_ongoing) {
                 spi_write_8(RF09_EDC, 0x1, err);
             }
@@ -1882,19 +1879,14 @@ void AT86RF215::handle_irq(void) {
         // Receiver Address Match handling
     }
     if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
-        got_rxfe = true;
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,GPIO_PIN_SET);
         if (rx_ongoing){
             packetReception(Transceiver::RF09, err);
             rx_ongoing = false;
         }
+        BBC0_got_rxfe = true;
     }
     if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
-        got_rxfs = true;
-//        HAL_Delay(10);
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,GPIO_PIN_SET);
-        // This might be unnecessary
-        // rx_ongoing  = true;
     }
 
     /* 2.4 GHz Transceiver */
@@ -1964,17 +1956,13 @@ void AT86RF215::handle_irq(void) {
         // Receiver Address Match handling
     }
     if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
-        got_rxfe = true;
         if (rx_ongoing){
             packetReception(Transceiver::RF24, err);
             rx_ongoing = false;
         }
+        BBC1_got_rxfe = true;
     }
     if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
-        got_rxfs = true;
-        // Receiver Frame Start handling
-        // This might be unnecessary
-        //rx_ongoing = true;
     }
 
 }
