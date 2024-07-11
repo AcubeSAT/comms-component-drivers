@@ -1964,7 +1964,7 @@ void AT86RF215::handle_irq(void) {
             set_state(Transceiver::RF24, State::RF_TX, err);
         }
         if (iq_tx_ongoing && embedded_control) {
-            uint16_t a = 16;
+            volatile uint16_t a = 16;
             a;
             // States are changed automatically
             // A command should be sent to the FPGA to start transmitting I/Q frames

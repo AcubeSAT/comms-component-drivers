@@ -139,7 +139,8 @@ struct AT86RF215Configuration {
 	IQmodeVoltage iqmodeVoltage = IQmodeVoltage::MODE_200_MV;
 	IQmodeVoltageIEE iqmodeVoltageIEE = IQmodeVoltageIEE::CMV;
 	EmbeddedControlTX embeddedControlTX = EmbeddedControlTX::DISABLED;
-	ChipMode chipMode = ChipMode::RF_MODE_BBRF;
+//    ChipMode chipMode = ChipMode::RF_MODE_BBRF;
+	ChipMode chipMode = ChipMode::RF_MODE_RF;
 	SkewAlignment skewAlignment = SkewAlignment::SKEW3906NS;
 
 	// Baseband Core

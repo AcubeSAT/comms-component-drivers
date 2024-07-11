@@ -1143,9 +1143,9 @@ private:
     /// Flag for checking whether the AGC is locked
     bool agc_held;
     /// Flag indicating that an IQ TX procedure is ongoing
-    bool iq_tx_ongoing;
+    static inline bool iq_tx_ongoing = false;
     /// Flag indicating that the IQ procedure is controlled manually or by the I/Q frame control bits
-    bool embedded_control;
+    static inline bool embedded_control = false;
 
 	SPI_HandleTypeDef *hspi;
 };
