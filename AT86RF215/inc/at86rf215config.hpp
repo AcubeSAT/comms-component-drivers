@@ -89,7 +89,7 @@ struct AT86RF215Configuration {
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl24 =
 			PowerAmplifierCurrentControl::PA_NO;
 	uint8_t txOutPower09 = 0x0;
-	uint8_t txOutPower24 = 0x1F;
+	uint8_t txOutPower24 = 0x0;
 	ExternalLNABypass externalLNABypass09 = ExternalLNABypass::FALSE;
 	ExternalLNABypass externalLNABypass24 = ExternalLNABypass::FALSE;
 	AutomaticGainControlMAP automaticGainControlMAP09 =
