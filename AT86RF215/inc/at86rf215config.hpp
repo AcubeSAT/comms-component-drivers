@@ -72,18 +72,24 @@ struct AT86RF215Configuration {
 			PowerAmplifierRampTime::RF_PARAMP4U;
 	TransmitterCutOffFrequency transmitterCutOffFrequency09 =
 			TransmitterCutOffFrequency::RF_FLC80KHZ;
+//	TransmitterCutOffFrequency transmitterCutOffFrequency24 =
+//			TransmitterCutOffFrequency::RF_FLC500KHZ;
 	TransmitterCutOffFrequency transmitterCutOffFrequency24 =
-			TransmitterCutOffFrequency::RF_FLC500KHZ;
+			TransmitterCutOffFrequency::RF_FLC1000KHZ;
 	TxRelativeCutoffFrequency txRelativeCutoffFrequency09 =
 			TxRelativeCutoffFrequency::FCUT_0375;
+//	TxRelativeCutoffFrequency txRelativeCutoffFrequency24 =
+//			TxRelativeCutoffFrequency::FCUT_025;
 	TxRelativeCutoffFrequency txRelativeCutoffFrequency24 =
-			TxRelativeCutoffFrequency::FCUT_025;
+			TxRelativeCutoffFrequency::FCUT_1;
 	bool directModulation09 = false;                  // Direct modulation must be kept off
 	bool directModulation24 = false;
 	TransmitterSampleRate transceiverSampleRate09 =   // Do not change this
 			TransmitterSampleRate::FS_400;
-	TransmitterSampleRate transceiverSampleRate24 =
-			TransmitterSampleRate::FS_4000;
+//	TransmitterSampleRate transceiverSampleRate24 =
+//			TransmitterSampleRate::FS_4000;
+    TransmitterSampleRate transceiverSampleRate24 =
+            TransmitterSampleRate::FS_2000;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl09 =
 			PowerAmplifierCurrentControl::PA_NO;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl24 =
@@ -137,10 +143,11 @@ struct AT86RF215Configuration {
 	ExternalLoopback externalLoopback = ExternalLoopback::DISABLED;
 	IQOutputCurrent iqOutputCurrent = IQOutputCurrent::CURR_2_MA;
 	IQmodeVoltage iqmodeVoltage = IQmodeVoltage::MODE_200_MV;
-	IQmodeVoltageIEE iqmodeVoltageIEE = IQmodeVoltageIEE::CMV;
+//	IQmodeVoltageIEE iqmodeVoltageIEE = IQmodeVoltageIEE::CMV;
+	IQmodeVoltageIEE iqmodeVoltageIEE = IQmodeVoltageIEE::IEEE;
 	EmbeddedControlTX embeddedControlTX = EmbeddedControlTX::DISABLED;
-//    ChipMode chipMode = ChipMode::RF_MODE_BBRF;
-	ChipMode chipMode = ChipMode::RF_MODE_RF;
+    ChipMode chipMode = ChipMode::RF_MODE_BBRF;
+//	ChipMode chipMode = ChipMode::RF_MODE_RF;
 	SkewAlignment skewAlignment = SkewAlignment::SKEW3906NS;
 
 	// Baseband Core
