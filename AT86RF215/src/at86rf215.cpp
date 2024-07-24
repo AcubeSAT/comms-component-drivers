@@ -1930,7 +1930,6 @@ void AT86RF215::handle_irq(void) {
 	if ((irq & InterruptMask::IFSynchronization) != 0) {
 		// I/Q IF Synchronization Failure handling
         // Notify that a retransmission is needed
-        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 	}
 	if ((irq & InterruptMask::TransceiverError) != 0) {
 		// Transceiver Error handling
@@ -1947,7 +1946,6 @@ void AT86RF215::handle_irq(void) {
         energy_measurement = get_receiver_energy_detection(Transceiver::RF24, err);
     }
     if ((irq & InterruptMask::TransceiverReady) != 0) {
-        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
         if (rx_ongoing){
             // Disable the baseband core if there is a cca procedure
             if (cca_ongoing){
