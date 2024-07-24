@@ -349,7 +349,7 @@ namespace INA3221 {
         /**
          * Inverse of the shunt resistor value in Mhos, namely shunt conductance
          */
-        static constexpr uint16_t ShuntConductance = 10;
+        static constexpr uint16_t ShuntConductance = 100;
 
         /**
          * Shunt Voltage registers base unit in uV
