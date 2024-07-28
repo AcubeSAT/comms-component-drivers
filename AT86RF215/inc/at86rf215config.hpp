@@ -89,7 +89,7 @@ struct AT86RF215Configuration {
 //	TransmitterSampleRate transceiverSampleRate24 =
 //			TransmitterSampleRate::FS_4000;
     TransmitterSampleRate transceiverSampleRate24 =
-            TransmitterSampleRate::FS_2000;
+            TransmitterSampleRate::FS_4000_3;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl09 =
 			PowerAmplifierCurrentControl::PA_NO;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl24 =
