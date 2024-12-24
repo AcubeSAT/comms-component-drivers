@@ -43,7 +43,7 @@ namespace AT86RF215 {
         BasebandCoreConfig basebandCoreConfig;
         FrequencySynthesizer freqSynthesizerConfig;
         ExternalFrontEndConfig externalFrontEndConfig;
-        BasebandCoreInterruptsConfig interruptsConfig;
+        BasebandCoreInterruptsConfig basebandCoreInterruptsConfig;
         RadioInterruptsConfig radioInterruptsConfig;
         IQInterfaceConfig iqInterfaceConfig;
         /// Flag indicating that a TX procedure is ongoing (with baseband core)
@@ -84,7 +84,7 @@ namespace AT86RF215 {
             externalFrontEndConfig = std::move(ExternalFrontEndConfig);
         }
         void setInterruptConfig(BasebandCoreInterruptsConfig&& InterruptsConfig) {
-            interruptsConfig = std::move(InterruptsConfig);
+            basebandCoreInterruptsConfig = std::move(InterruptsConfig);
         }
         void setRadioInterruptConfig(RadioInterruptsConfig&& RadioInterruptsConfig) {
             radioInterruptsConfig = std::move(RadioInterruptsConfig);

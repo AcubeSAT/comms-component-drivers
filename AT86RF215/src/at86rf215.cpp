@@ -1046,15 +1046,15 @@ namespace AT86RF215 {
         // Set IRQ masks
         setup_irq_mask(Transceiver::RF09, radioInterruptsConfig.iqIfSynchronizationFailure09, radioInterruptsConfig.transceiverError09,
                        radioInterruptsConfig.batteryLow09, radioInterruptsConfig.energyDetectionCompletion09, radioInterruptsConfig.transceiverReady09,
-                       radioInterruptsConfig.wakeup09, interruptsConfig.frameBufferLevelIndication09, interruptsConfig.agcRelease09,
-                       interruptsConfig.agcHold09, interruptsConfig.transmitterFrameEnd09, interruptsConfig.receiverExtendedMatch09,
-                       interruptsConfig.receiverAddressMatch09, interruptsConfig.receiverFrameEnd09, interruptsConfig.receiverFrameStart09, err);
+                       radioInterruptsConfig.wakeup09, basebandCoreInterruptsConfig.frameBufferLevelIndication09, basebandCoreInterruptsConfig.agcRelease09,
+                       basebandCoreInterruptsConfig.agcHold09, basebandCoreInterruptsConfig.transmitterFrameEnd09, basebandCoreInterruptsConfig.receiverExtendedMatch09,
+                       basebandCoreInterruptsConfig.receiverAddressMatch09, basebandCoreInterruptsConfig.receiverFrameEnd09, basebandCoreInterruptsConfig.receiverFrameStart09, err);
 
         setup_irq_mask(Transceiver::RF24, radioInterruptsConfig.iqIfSynchronizationFailure24, radioInterruptsConfig.transceiverError24,
                        radioInterruptsConfig.batteryLow24, radioInterruptsConfig.energyDetectionCompletion24, radioInterruptsConfig.transceiverReady24,
-                       radioInterruptsConfig.wakeup24, interruptsConfig.frameBufferLevelIndication24, interruptsConfig.agcRelease24,
-                       interruptsConfig.agcHold24, interruptsConfig.transmitterFrameEnd24, interruptsConfig.receiverExtendedMatch24,
-                       interruptsConfig.receiverAddressMatch24, interruptsConfig.receiverFrameEnd24, interruptsConfig.receiverFrameStart24, err);
+                       radioInterruptsConfig.wakeup24, basebandCoreInterruptsConfig.frameBufferLevelIndication24, basebandCoreInterruptsConfig.agcRelease24,
+                       basebandCoreInterruptsConfig.agcHold24, basebandCoreInterruptsConfig.transmitterFrameEnd24, basebandCoreInterruptsConfig.receiverExtendedMatch24,
+                       basebandCoreInterruptsConfig.receiverAddressMatch24, basebandCoreInterruptsConfig.receiverFrameEnd24, basebandCoreInterruptsConfig.receiverFrameStart24, err);
 
         // Set IRQ pin
         setup_irq_cfg(generalConfig.irqMaskMode, generalConfig.irqPolarity,
