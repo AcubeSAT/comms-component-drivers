@@ -4,7 +4,7 @@
 #include "stm32h7xx_hal.h"
 #include <utility>
 
-const uint16_t TIMEOUT = 1000;
+const uint16_t AC7Z020_TIMEOUT = 1000;
 
 namespace AC7Z020 {
 
