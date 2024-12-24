@@ -1,14 +1,7 @@
 #pragma once
 
 namespace AT86RF215 {
-
-    enum class EnergyDetectionTimeBasis {
-        RF_2MS = 0x0,
-        RF_8MS = 0x1,
-        RF_32MS = 0x2,
-        RF_128MS = 0x3,
-    };
-
+    /// RFn_STATE
     enum State {
         RF_NOP = 0x0,
         RF_SLEEP = 0x1,
@@ -20,7 +13,16 @@ namespace AT86RF215 {
         RF_RESET = 0x7,
         RF_INVALID = 0x8,
     };
-    // BBCn_FSKC0
+
+    /// RFn_DTB
+    enum class EnergyDetectionTimeBasis {
+        RF_2MS = 0x0,
+        RF_8MS = 0x1,
+        RF_32MS = 0x2,
+        RF_128MS = 0x3,
+    };
+
+    /// BBCn_FSKC0
     enum class Bandwidth_time_product {
         BT_0_5 = 0x0,
         BT_1_0 = 0x1,
@@ -43,13 +45,12 @@ namespace AT86RF215 {
         bf_1_750 = 0x6,
         bf_2_000 = 0x7,
     };
-
     enum class FSK_mod_order {
         binary_fsk = 0x0,
         four_fsk = 0x1,
     };
-    /// BBCn_FSKC1
 
+    /// BBCn_FSKC1
     enum class Freq_Inversion {
         freq_inversion_off = 0x0,
         freq_inversion_on = 0x1
@@ -62,6 +63,7 @@ namespace AT86RF215 {
         sr_300 = 0x4,
         sr_400 = 0x5,
     };
+
     /// BBC_FSKC2
     enum class Preamble_Detection {
         preamble_det_without_rssi = 0x0,
@@ -179,6 +181,12 @@ namespace AT86RF215 {
         AT86RF215 = 0x34,
         AT86RF215IQ = 0x35,
         AT86RF215M = 0x36,
+    };
+
+    enum class DeviceVersionNumber {
+        INVALID_VERSION_NUMBER = 0x00,
+        V1 = 0x01,
+        V3 = 0x03
     };
 
     enum RegisterBitmasks {

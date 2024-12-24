@@ -43,17 +43,15 @@ namespace AT86RF215 {
         BasebandCoreConfig basebandCoreConfig;
         FrequencySynthesizer freqSynthesizerConfig;
         ExternalFrontEndConfig externalFrontEndConfig;
-        InterruptsConfig interruptsConfig;
+        BasebandCoreInterruptsConfig interruptsConfig;
         RadioInterruptsConfig radioInterruptsConfig;
         IQInterfaceConfig iqInterfaceConfig;
-        /// Flag indicating that a TX procedure is ongoing
+        /// Flag indicating that a TX procedure is ongoing (with baseband core)
         bool tx_ongoing;
-        /// Flag indicating that an RX procedure is ongoing
+        /// Flag indicating that an RX procedure is ongoing (with baseband core)
         bool rx_ongoing;
         /// Flag indicating that the Clean Channel Assessment procedure is ongoing
         bool cca_ongoing;
-        /// Flag for checking whether the AGC is locked
-        bool agc_held;
         SPI_HandleTypeDef* hspi;
 
         /*
@@ -65,7 +63,7 @@ namespace AT86RF215 {
         // Constructor with general config only
         At86rf215(SPI_HandleTypeDef* hspim)
                 : hspi(hspim),
-                  tx_ongoing(false), rx_ongoing(false), agc_held(false) {}
+                  tx_ongoing(false), rx_ongoing(false), cca_ongoing(false) {}
 
         void setGeneralConfig(GeneralConfiguration&& GeneralConfig) {
             generalConfig = std::move(GeneralConfig);
@@ -85,7 +83,7 @@ namespace AT86RF215 {
         void setExternalFrontEndControlConfig(ExternalFrontEndConfig&& ExternalFrontEndConfig) {
             externalFrontEndConfig = std::move(ExternalFrontEndConfig);
         }
-        void setInterruptConfig(InterruptsConfig&& InterruptsConfig) {
+        void setInterruptConfig(BasebandCoreInterruptsConfig&& InterruptsConfig) {
             interruptsConfig = std::move(InterruptsConfig);
         }
         void setRadioInterruptConfig(RadioInterruptsConfig&& RadioInterruptsConfig) {
@@ -216,7 +214,7 @@ namespace AT86RF215 {
         uint16_t get_pll_channel_number(Transceiver transceiver, Error& err);
 
         /*
-         * Gets the loop bandwitdh of the PLL. Options are:
+         * Sets the loop bandwitdh of the PLL. Options are:
          * 	- Default (0x0)
          * 	- 15% smaller than default (0x1)
          * 	- 15% larger than default (0x2)
@@ -250,16 +248,11 @@ namespace AT86RF215 {
         /*
          * Configures the PLL
          *
-         * @param transceiver		Specify the transceiver used
-         * @param freq 				Central frequency of the PLL
-         * @param channel_number	Channel number of the PLL
-         * @param channel_mode		Channel mode of the PLL (defines frequency range and stepping)
-         * @param bw				Loopbandwith of the PLL
-         * @param err				Pointer to raised error
+         * @param transceiver		         Specify the transceiver used
+         * @param frequencySynthesizerConfig Reference to configuration with frequency, channel mode and bandwidth
+         * @param err				         Pointer to raised error
          */
-        void configure_pll(Transceiver transceiver, uint16_t freq,
-                           uint8_t channel_number, PLLChannelMode channel_mode,
-                           PLLBandwidth bw, uint8_t channel_spacing, Error& err);
+        void At86rf215::configure_pll(Transceiver transceiver, FrequencySynthesizer& frequencySynthesizerConfig, Error& err);
 
         /*
          * Gets the part number of the device
@@ -277,7 +270,7 @@ namespace AT86RF215 {
          *
          * @param err	Pointer to raised error
          */
-        uint8_t get_version_number(Error& err);
+        DeviceVersionNumber get_version_number(Error& err);
 
         /*
          * Sets the PLL frequency
@@ -750,26 +743,49 @@ namespace AT86RF215 {
          * @param err				Pointer to raised error
          *
          */
-        void transmitBasebandPacketsTx(Transceiver transceiver, uint8_t* packet,
-                                       uint16_t length, Error& err);
+        void packetTransmissionBaseband(Transceiver transceiver, uint8_t* packet,
+                                        uint16_t length, Error& err);
+
+        /**
+         * Begins receiving operations for Rx packet
+         *
+         * @param transceiver		Specifies the transceiver used
+         * @param err				Pointer to raised error
+         */
+        void beginBasebandPacketReception(Transceiver transceiver, Error &err);
 
         etl::expected<uint16_t, Error> get_received_length(Transceiver transceiver, Error& err);
-        void packetReception(Transceiver transceiver, Error& err);
-        uint8_t received_packet[2047];
+
+        /**
+         *  Reads received packet upon reception of RXFE interrupt
+         *
+         * @param transceiver
+         * @param err
+         */
+        void packetReceptionBaseband(Transceiver transceiver, Error& err);
+
+        uint8_t received_packet[2047]; // buffer for storing received packet in baseband core operation
+        int8_t energy_measurement = 0;
+
         // flags for interrupts //
 
         // radio interrupts //
-        bool IFSynchronization_flag, TransceiverError_flag, EnergyDetectionCompletion_flag, TransceiverReady_flag, Wakeup_flag = false;
+        bool IFSynchronization_flag = false;
+        bool TransceiverError_flag = false;
+        bool EnergyDetectionCompletion_flag = false;
+        bool TransceiverReady_flag  = false;
+        bool Wakeup_flag = false;
 
         // baseband core interrupts //
-        bool FrameBufferLevelIndication_flag, AGCRelease_flag, AGCHold_flag, TransmitterFrameEnd_flag, ReceiverExtendMatch_flag, ReceiverAddressMatch_flag, ReceiverFrameEnd_flag, ReceiverFrameStart_flag = false;
+        bool FrameBufferLevelIndication_flag = false;
+        bool AGCRelease_flag = false;
+        bool AGCHold_flag = false;
+        bool TransmitterFrameEnd_flag = false;
+        bool ReceiverExtendMatch_flag = false;
+        bool ReceiverAddressMatch_flag = false;
+        bool ReceiverFrameEnd_flag = false;
+        bool ReceiverFrameStart_flag = false;
 
-
-        /**
-         * This is automatically called after triggering the packet reception
-          * @param transceiver		Specifies the transceiver used
-         * @param err				Pointer to raised error
-         */
     };
 
     extern At86rf215 transceiver;

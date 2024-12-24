@@ -13,7 +13,7 @@ namespace AT86RF215 {
         // RFn_RXDFE
         RxRelativeCutoffFrequency rxRelativeCutoffFrequency09, rxRelativeCutoffFrequency24;
         ReceiverSampleRate receiverSampleRate09, receiverSampleRate24;
-        /// RFn_AGCC
+        /// RFn_AGCC RFn_AGCS
         bool agcInput09, agcInput24;
         AverageTimeNumberSamples averageTimeNumberSamples09, averageTimeNumberSamples24;
         AGCReset agcReset_09, agcReset_24;
@@ -67,33 +67,61 @@ namespace AT86RF215 {
         }
 
         // update params
-        void setRXBWC(ReceiverBandwidth bw09, bool inversion09, bool shift09) {
-            receiverBandwidth09 = bw09;
-            ifInversion09 = inversion09;
-            ifShift09 = shift09;
+        void setRXBWC(Transceiver transceiver, ReceiverBandwidth bw, bool inversion, bool shift) {
+            if (transceiver == Transceiver::RF09) {
+                receiverBandwidth09 = bw;
+                ifInversion09 = inversion;
+                ifShift09 = shift;
+            }
+            else {
+                receiverBandwidth24 = bw;
+                ifInversion24 = inversion;
+                ifShift24 = shift;
+            }
         }
 
         //
-        void setRXDFE(RxRelativeCutoffFrequency cutoff09, ReceiverSampleRate sampleRate09) {
-            rxRelativeCutoffFrequency09 = cutoff09;
-            receiverSampleRate09 = sampleRate09;
+        void setRXDFE(Transceiver transceiver, RxRelativeCutoffFrequency cutoff, ReceiverSampleRate sampleRate) {
+            if (transceiver == Transceiver::RF09) {
+                rxRelativeCutoffFrequency09 = cutoff;
+                receiverSampleRate09 = sampleRate;
+            }
+            else {
+                rxRelativeCutoffFrequency24 = cutoff;
+                receiverSampleRate24 = sampleRate;
+            }
         }
 
         //
-        void setEDC(EnergyDetectionTimeBasis timeBasis09, EnergyDetectionMode mode09,
-                    uint8_t detectFactor09) {
-            energyDetectionBasis09 = timeBasis09;
-            energyDetectionMode09 = mode09;
-            energyDetectDurationFactor09 = detectFactor09;
+        void setEDC(Transceiver transceiver, EnergyDetectionTimeBasis timeBasis, EnergyDetectionMode mode,
+                    uint8_t detectFactor) {
+            if (transceiver == Transceiver::RF09) {
+                energyDetectionBasis09 = timeBasis;
+                energyDetectionMode09 = mode;
+                energyDetectDurationFactor09 = detectFactor;
+            }
+            else {
+                energyDetectionBasis24 = timeBasis;
+                energyDetectionMode24 = mode;
+                energyDetectDurationFactor24 = detectFactor;
+            }
         }
 
         //
-        void setAGCC(bool input09, AverageTimeNumberSamples avgSamples09, AGCEnable enabled09,
-                     AutomaticGainTarget target09) {
-            agcInput09 = input09;
-            averageTimeNumberSamples09 = avgSamples09;
-            agcEnabled09 = enabled09;
-            automaticGainTarget09 = target09;
+        void setAGCC(Transceiver transceiver, bool input, AverageTimeNumberSamples avgSamples, AGCEnable enabled,
+                     AutomaticGainTarget target) {
+            if (transceiver == Transceiver::RF09) {
+                agcInput09 = input;
+                averageTimeNumberSamples09 = avgSamples;
+                agcEnabled09 = enabled;
+                automaticGainTarget09 = target;
+            }
+            else {
+                agcInput24 = input;
+                averageTimeNumberSamples24 = avgSamples;
+                agcEnabled24 = enabled;
+                automaticGainTarget24 = target;
+            }
         }
     };
 
@@ -122,18 +150,37 @@ namespace AT86RF215 {
                     .powerAmplifierCurrentControl09 = PowerAmplifierCurrentControl::PA_NO,
                     .txOutPower09 = 0x00};
         }
-        void setTXDFE(TxRelativeCutoffFrequency cutoffFrequency09, Direct_Mod_Enable_FSKDM modulation09, TransmitterSampleRate sampleRate09) {
-            txRelativeCutoffFrequency09 = cutoffFrequency09;
-            directModulation09 = modulation09;
-            transceiverSampleRate09 = sampleRate09;
+        void setTXDFE(Transceiver transceiver, TxRelativeCutoffFrequency cutoffFrequency, Direct_Mod_Enable_FSKDM modulation, TransmitterSampleRate sampleRate) {
+            if (transceiver == Transceiver::RF09) {
+                txRelativeCutoffFrequency09 = cutoffFrequency;
+                directModulation09 = modulation;
+                transceiverSampleRate09 = sampleRate;
+            }
+            else {
+                txRelativeCutoffFrequency24 = cutoffFrequency;
+                directModulation24 = modulation;
+                transceiverSampleRate24 = sampleRate;
+            }
         }
-        void setTXCUTC(PowerAmplifierRampTime rampTime09, TransmitterCutOffFrequency cutoffFrequency09) {
-            powerAmplifierRampTime09 = rampTime09;
-            transmitterCutOffFrequency09 = cutoffFrequency09;
+        void setTXCUTC(Transceiver transceiver, PowerAmplifierRampTime rampTime, TransmitterCutOffFrequency cutoffFrequency) {
+            if (transceiver == Transceiver::RF09) {
+                powerAmplifierRampTime09 = rampTime;
+                transmitterCutOffFrequency09 = cutoffFrequency;
+            }
+            else {
+                powerAmplifierRampTime24 = rampTime;
+                transmitterCutOffFrequency24 = cutoffFrequency;
+            }
         }
-        void setRFnPAC(PowerAmplifierCurrentControl currentControl09, uint8_t outPower09) {
-            powerAmplifierCurrentControl09 = currentControl09;
-            txOutPower09 = outPower09;
+        void setRFnPAC(Transceiver transceiver, PowerAmplifierCurrentControl currentControl, uint8_t outPower) {
+            if (transceiver == Transceiver::RF09) {
+                powerAmplifierCurrentControl09 = currentControl;
+                txOutPower09 = outPower;
+            }
+            else {
+                powerAmplifierCurrentControl24 = currentControl;
+                txOutPower24 = outPower;
+            }
         }
     };
 
@@ -222,125 +269,186 @@ namespace AT86RF215 {
             };
         }
         /// BBC_PC
-        void setBBC_PC(bool ct09, bool fcsfEn09, bool tautoFcs09, FrameCheckSequenceType fcsType09, bool bbEn09, PhysicalLayerType plType09) {
-            continuousTransmit09 = ct09;
-            frameCheckSequenceFilterEn09 = fcsfEn09;
-            transmitterAutoFrameCheckSequence09 = tautoFcs09;
-            frameCheckSequenceType09 = fcsType09;
-            baseBandEnable09 = bbEn09;
-            physicalLayerType09 = plType09;
+        void setBBC_PC(Transceiver transceiver, bool ct, bool fcsfEn, bool tautoFcs, FrameCheckSequenceType fcsType, bool bbEn, PhysicalLayerType plType) {
+            if (transceiver == Transceiver::RF09) {
+                continuousTransmit09 = ct;
+                frameCheckSequenceFilterEn09 = fcsfEn;
+                transmitterAutoFrameCheckSequence09 = tautoFcs;
+                frameCheckSequenceType09 = fcsType;
+                baseBandEnable09 = bbEn;
+                physicalLayerType09 = plType;
+            }
+            else {
+                continuousTransmit24 = ct;
+                frameCheckSequenceFilterEn24 = fcsfEn;
+                transmitterAutoFrameCheckSequence24 = tautoFcs;
+                frameCheckSequenceType24 = fcsType;
+                baseBandEnable24 = bbEn;
+                physicalLayerType24 = plType;
+            }
         }
         /// BBC_FSKC0
-        void setBBC_FSKC0(Bandwidth_time_product bwTime09, Mod_index_scale midxs09,
-                          Mod_index midx09, FSK_mod_order mord09) {
-            bandwidth_time_09 = bwTime09;
-            midxs_09 = midxs09;
-            midx_09 = midx09;
-            mord_09 = mord09;
+        void setBBC_FSKC0(Transceiver transceiver, Bandwidth_time_product bwTime, Mod_index_scale midxs,
+                          Mod_index midx, FSK_mod_order mord) {
+            if (transceiver == Transceiver::RF09) {
+                bandwidth_time_09 = bwTime;
+                midxs_09 = midxs;
+                midx_09 = midx;
+                mord_09 = mord;
+            }
+            else {
+                bandwidth_time_24 = bwTime;
+                midxs_24 = midxs;
+                midx_24 = midx;
+                mord_24 = mord;
+            }
         }
         /// BBC_FSKC1
-        void setBBC_FSKC1(Freq_Inversion freqInv09, MR_FSK_symbol_rate sr09) {
-            freq_inv_09 = freqInv09;
-            sr_09 = sr09;
+        void setBBC_FSKC1(Transceiver transceiver, Freq_Inversion freqInv, MR_FSK_symbol_rate sr) {
+            if (transceiver == Transceiver::RF09) {
+                freq_inv_09 = freqInv;
+                sr_09 = sr;
+            }
+            else {
+                freq_inv_24 = freqInv;
+                sr_24 = sr;
+            }
         }
         /// BBC_FSKC2
-        void setBBC_FSKC2(Preamble_Detection preambleDet09, Receiver_Override recOverride09,
-                          Receiver_Preamble_Timeout recPreambleTimeout09, Mode_Switch_Enable modeSwitchEn09,
-                          Preamble_Inversion preambleInv09, FEC_Scheme fecScheme09,
-                          Interleaving_Enable interleavingEn09) {
-            preamble_detection_09 = preambleDet09;
-            receiver_override_09 = recOverride09;
-            receiver_preamble_timeout_09 = recPreambleTimeout09;
-            mode_switch_en_09 = modeSwitchEn09;
-            preamble_inversion_09 = preambleInv09;
-            fec_scheme_09 = fecScheme09;
-            interleaving_enable_09 = interleavingEn09;
+        void setBBC_FSKC2(Transceiver transceiver, Preamble_Detection preambleDet, Receiver_Override recOverride,
+                          Receiver_Preamble_Timeout recPreambleTimeout, Mode_Switch_Enable modeSwitchEn,
+                          Preamble_Inversion preambleInv, FEC_Scheme fecScheme,
+                          Interleaving_Enable interleavingEn) {
+            if (transceiver == Transceiver::RF09) {
+                preamble_detection_09 = preambleDet;
+                receiver_override_09 = recOverride;
+                receiver_preamble_timeout_09 = recPreambleTimeout;
+                mode_switch_en_09 = modeSwitchEn;
+                preamble_inversion_09 = preambleInv;
+                fec_scheme_09 = fecScheme;
+                interleaving_enable_09 = interleavingEn;
+            }
+            else {
+                preamble_detection_24 = preambleDet;
+                receiver_override_24 = recOverride;
+                receiver_preamble_timeout_24 = recPreambleTimeout;
+                mode_switch_en_24 = modeSwitchEn;
+                preamble_inversion_24 = preambleInv;
+                fec_scheme_24 = fecScheme;
+                interleaving_enable_24 = interleavingEn;
+            }
         }
         /// BBC_FSKC3
-        void setBBC_FSKC3(SFD_Detection_Threshold sfdDetectionThreshold, Preamble_Detection_Threshold preambleDetectionThreshold) {
-            sfdt_09 = sfdDetectionThreshold;
-            prdt_09 = preambleDetectionThreshold;
+        void setBBC_FSKC3(Transceiver transceiver, SFD_Detection_Threshold sfdDetectionThreshold, Preamble_Detection_Threshold preambleDetectionThreshold) {
+            if (transceiver == Transceiver::RF09) {
+                sfdt_09 = sfdDetectionThreshold;
+                prdt_09 = preambleDetectionThreshold;
+            }
+            else {
+                sfdt_24 = sfdDetectionThreshold;
+                prdt_24 = preambleDetectionThreshold;
+            }
         }
         /// BBC_FSKC4
-        void setBBC_FSKC4(SFD_Quantization sfdQuantization, SFD_32 sfd32,
+        void setBBC_FSKC4(Transceiver transceiver, SFD_Quantization sfdQuantization, SFD_32 sfd32,
                           Raw_Mode_Reversal_Bit rawModeReversalBit,
                           CSFD1 csfd1, CSFD0 csfd2) {
-            // Set values for the 09 band
-            sfdQuantization_09 = sfdQuantization;
-            sfd32_09 = sfd32;
-            rawModeReversalBit_09 = rawModeReversalBit;
-            csfd1_09 = csfd1;
-            csfd0_09 = csfd2;
+            if (transceiver == Transceiver::RF09) {
+                sfdQuantization_09 = sfdQuantization;
+                sfd32_09 = sfd32;
+                rawModeReversalBit_09 = rawModeReversalBit;
+                csfd1_09 = csfd1;
+                csfd0_09 = csfd2;
+            }
+            else {
+                sfdQuantization_24 = sfdQuantization;
+                sfd32_24 = sfd32;
+                rawModeReversalBit_24 = rawModeReversalBit;
+                csfd1_24 = csfd1;
+                csfd0_24 = csfd2;
+            }
         }
         /// BBCn_FSKPHRTX
-        void set_BBC_FSKPHRTX(SFD_Used sfdused, Data_Whitening dataWhitening) {
-            sfdUsed_09 = sfdused;
-            dataWhitening_09 = dataWhitening;
+        void set_BBC_FSKPHRTX(Transceiver transceiver, SFD_Used sfdused, Data_Whitening dataWhitening) {
+            if (transceiver == Transceiver::RF09) {
+                sfdUsed_09 = sfdused;
+                dataWhitening_09 = dataWhitening;
+            }
+            else {
+                sfdUsed_24 = sfdused;
+                dataWhitening_24 = dataWhitening;
+            }
         }
         /// BBCn_FSKDM
-        void set_BBC_FSKDM(FSK_Preamphasis_Enable fskPreamphasisEnable, Direct_Mod_Enable_FSKDM directModEnableFskdm) {
-            fskPreamphasisEnable_09 = fskPreamphasisEnable;
-            directModEnableFskdm_09 = directModEnableFskdm;
+        void set_BBC_FSKDM(Transceiver transceiver, FSK_Preamphasis_Enable fskPreamphasisEnable, Direct_Mod_Enable_FSKDM directModEnableFskdm) {
+            if (transceiver == Transceiver::RF09) {
+                fskPreamphasisEnable_09 = fskPreamphasisEnable;
+                directModEnableFskdm_09 = directModEnableFskdm;
+            }
+            else {
+                fskPreamphasisEnable_24 = fskPreamphasisEnable;
+                directModEnableFskdm_24 = directModEnableFskdm;
+            }
         }
     };
 
     struct FrequencySynthesizer {
+        bool validConfig09, validConfig24;
+
         /// Cached frequency for easy access
-        uint32_t frequency; // Frequency in kHz
-        /// RF_n CS
-        uint8_t channelSpacing09, channelSpacing24;
-        /// RFn_CCFOL - Channel Center Frequency F0 Low Byte
-        /// RFn_CCFOH - Channel Center Frequency F0 High Byte
-        /// combined RFn_CCF0L, RFn_CCFOH : channelCenterFrequency09
-        uint16_t channelCenterFrequency09;
-        /// RFn_CNL
-        uint8_t channelNumber09;
+        uint32_t frequency09, frequency24; // Frequency in kHz
+
         /// RFn_CNM
         PLLChannelMode channelMode09, channelMode24;
         /// RFn_PLL
         PLLBandwidth loopBandwidth09, loopBandwidth24;
-        /// RFn_PLLCF
 
         static FrequencySynthesizer DefaultFrequencySynthesizerConfig() {
-            FrequencySynthesizer fs{
-                    .frequency = 401000,
-                    // spacing = channelSpacing * 25kHz
-                    .channelSpacing09 = 0x10,
-                    .channelSpacing24 = 0xA,
-                    .channelMode09 = PLLChannelMode::FineResolution450,
-                    .channelMode24 = PLLChannelMode::FineResolution2443,
-                    .loopBandwidth09 = PLLBandwidth::BWDefault,
-                    .loopBandwidth24 = PLLBandwidth::BWDefault,
-            };
-            fs.setFrequency_FineResolution_CMN_1(fs.frequency);
+            FrequencySynthesizer fs;
+            fs.setup_FrequencySynthesizer(Transceiver::RF09, 401000, PLLChannelMode::FineResolution450, PLLBandwidth::BWDefault);
+            fs.setup_FrequencySynthesizer(Transceiver::RF24, 2425000, PLLChannelMode::FineResolution2443, PLLBandwidth::BWDefault);
             return fs;
         }
-        /// Helper to calculate N_channel
-        uint32_t calculateN_FineResolution_CMN_1(uint32_t freq) {
-            return (freq - 377000) * 65536 / 6500;
-        }
-        /// Set frequency and calculate corresponding CCF0 and CNL
-        void setFrequency_FineResolution_CMN_1(uint32_t freq) {
-            frequency = freq;
-            uint32_t N = calculateN_FineResolution_CMN_1(frequency);
-            /// Combine CCF0H and CCF0L into a single 16-bit value
-            channelCenterFrequency09 = (N >> 8) & 0xFFFF; // Take bits 8-23
-            channelNumber09 = N & 0xFF;                   // Extract the lowest byte (bits 0-7)
+
+        // Frequency must be given in kHz. If the given frequency and channel mode are incompatible
+        // with the given tranceiver, a flag will be set to false, so an error can be returned during
+        // register configuration.
+        void setup_FrequencySynthesizer(Transceiver transceiver, uint32_t frequency, PLLChannelMode channelMode, PLLBandwidth bw) {
+
+            transceiver == RF09 ? (validConfig09 = false) : (validConfig24 = false);
+
+            if (channelMode == PLLChannelMode::IEECompliant) {
+                // @TODO: CCF0 and CS for each band in 68d, 68e tables of IEEE Std 802.15.4g™-2012
+                return;
+            }
+            else if (channelMode == PLLChannelMode::FineResolution450) {
+                if (frequency < 389500 || frequency > 510000 || transceiver == Transceiver::RF24) {
+                    return;
+                }
+                frequency09 = frequency;
+                channelMode09 = channelMode;
+                loopBandwidth09 = bw;
+            }
+            else if (channelMode == PLLChannelMode::FineResolution900) {
+                if (frequency < 779000 || frequency > 1020000 || transceiver == Transceiver::RF24) {
+                    return;
+                }
+                frequency09 = frequency;
+                channelMode09 = channelMode;
+                loopBandwidth09 = bw;
+            }
+            else {
+                if (frequency < 2400000 || frequency > 2483500 || transceiver == Transceiver::RF09) {
+                    return;
+                }
+                frequency24 = frequency;
+                channelMode24 = channelMode;
+                loopBandwidth24 = bw;
+            }
+
+            transceiver == RF09 ? (validConfig09 = true) : (validConfig24 = true);
         }
 
-        // Get frequency based on CCF0 and CNL
-        double getFrequency_FineResolution_CMN_1() {
-            uint32_t N_channel = ((uint32_t) channelCenterFrequency09 << 8) | channelNumber09; // Reconstruct full N_channel
-            return 377000.0 + (6500.0 * N_channel) / 65536.0;
-        }
-        //
-        etl::array<uint8_t, 3> getFrequency_in_bytes() {
-            etl::array<uint8_t, 3> arr{};                                   // Use etl::array for embedded compatibility
-            arr[2] = channelNumber09;                                       // Channel Number
-            arr[1] = static_cast<uint8_t>(channelCenterFrequency09 >> 8);   // Upper byte
-            arr[0] = static_cast<uint8_t>(channelCenterFrequency09 & 0xFF); // Lower byte
-            return arr;                                                     // Safe return by value
-        }
     };
 
     struct ExternalFrontEndConfig {
@@ -362,17 +470,36 @@ namespace AT86RF215 {
                     .externalFrontEnd_09 = ExternalFrontEndControl::front_end_config_txrx_switch};
         }
         void set_RFn_AUXS(
-                ExternalLNABypass extLNA09,            // externalLNABypass09
-                AutomaticGainControlMAP agcMap09,      // automaticGainControlMAP09
-                AnalogVoltageEnable avEn09,            // analogVoltageEnable09
-                AutomaticVoltageExternal avExt09,      // automaticVoltageExternal09
-                PowerAmplifierVoltageControl pavCtrl09 // powerAmplifierVoltageControl09
+                Transceiver transceiver,
+                ExternalLNABypass extLNA,            // externalLNABypass09
+                AutomaticGainControlMAP agcMap,      // automaticGainControlMAP09
+                AnalogVoltageEnable avEn,            // analogVoltageEnable09
+                AutomaticVoltageExternal avExt,      // automaticVoltageExternal09
+                PowerAmplifierVoltageControl pavCtrl // powerAmplifierVoltageControl09
         ) {
-            externalLNABypass09 = extLNA09;
-            automaticGainControlMAP09 = agcMap09;
-            analogVoltageEnable09 = avEn09;
-            automaticVoltageExternal09 = avExt09;
-            powerAmplifierVoltageControl09 = pavCtrl09;
+            if (transceiver == Transceiver::RF09) {
+                externalLNABypass09 = extLNA;
+                automaticGainControlMAP09 = agcMap;
+                analogVoltageEnable09 = avEn;
+                automaticVoltageExternal09 = avExt;
+                powerAmplifierVoltageControl09 = pavCtrl;
+            }
+            else {
+                externalLNABypass24 = extLNA;
+                automaticGainControlMAP24 = agcMap;
+                analogVoltageEnable24 = avEn;
+                automaticVoltageExternal24 = avExt;
+                powerAmplifierVoltageControl24 = pavCtrl;
+            }
+        }
+
+        void set_RFn_PADFE(Transceiver transceiver, ExternalFrontEndControl externalFrontEndControl) {
+            if (transceiver == Transceiver::RF09) {
+                externalFrontEnd_09 = externalFrontEndControl;
+            }
+            else {
+                externalFrontEnd_24 = externalFrontEndControl;
+            }
         }
     };
 
@@ -400,9 +527,28 @@ namespace AT86RF215 {
                     .chipMode = ChipMode::RF_MODE_BBRF,
                     .skewAlignment = SkewAlignment::SKEW3906NS};
         }
+
+        void set_RF_IQIFC0(
+                ExternalLoopback external_Loopback,
+                IQOutputCurrent iqOutput_Current,
+                IQmodeVoltage iqmode_Voltage,
+                IQmodeVoltageIEE iqmodeVoltage_IEE,
+                EmbeddedControlTX embeddedControl_Tx
+        ) {
+
+            externalLoopback = external_Loopback;
+            iqOutputCurrent = iqOutput_Current;
+            iqmodeVoltage = iqmode_Voltage;
+            iqmodeVoltageIEE = iqmodeVoltage_IEE;
+            embeddedControlTX = embeddedControl_Tx;
+        }
+        void set_RF_IQIFC1(ChipMode chip_Mode, SkewAlignment skew_alignment) {
+            chipMode = chip_Mode;
+            skewAlignment = skew_alignment;
+        }
     };
 
-    struct InterruptsConfig {
+    struct BasebandCoreInterruptsConfig {
         /// BBCn_IRQM
         bool frameBufferLevelIndication09, frameBufferLevelIndication24;
         bool agcRelease09, agcRelease24;
@@ -413,7 +559,7 @@ namespace AT86RF215 {
         bool receiverFrameEnd09, receiverFrameEnd24;
         bool receiverFrameStart09, receiverFrameStart24;
 
-        static InterruptsConfig DefaultInterruptsConfig() {
+        static BasebandCoreInterruptsConfig DefaultInterruptsConfig() {
             return {
                     .frameBufferLevelIndication09 = true,
                     .frameBufferLevelIndication24 = false,
@@ -433,7 +579,8 @@ namespace AT86RF215 {
                     .receiverFrameStart24 = false,
             };
         }
-        void setupInterruptsConfig(bool fbl,
+        void setupInterruptsConfig(Transceiver transceiver,
+                                   bool fbl,
                                    bool ar,
                                    bool ah,
                                    bool tfe,
@@ -441,14 +588,26 @@ namespace AT86RF215 {
                                    bool ram,
                                    bool rfe,
                                    bool rfs) {
-            frameBufferLevelIndication09 = fbl;
-            agcRelease09 = ar;
-            agcHold09 = ah;
-            transmitterFrameEnd09 = tfe;
-            receiverExtendedMatch09 = rem;
-            receiverAddressMatch09 = ram;
-            receiverFrameEnd09 = rfe;
-            receiverFrameStart09 = rfs;
+            if (transceiver == Transceiver::RF09) {
+                frameBufferLevelIndication09 = fbl;
+                agcRelease09 = ar;
+                agcHold09 = ah;
+                transmitterFrameEnd09 = tfe;
+                receiverExtendedMatch09 = rem;
+                receiverAddressMatch09 = ram;
+                receiverFrameEnd09 = rfe;
+                receiverFrameStart09 = rfs;
+            }
+            else {
+                frameBufferLevelIndication24 = fbl;
+                agcRelease24 = ar;
+                agcHold24 = ah;
+                transmitterFrameEnd24 = tfe;
+                receiverExtendedMatch24 = rem;
+                receiverAddressMatch24 = ram;
+                receiverFrameEnd24 = rfe;
+                receiverFrameStart24 = rfs;
+            }
         }
     };
 
@@ -479,45 +638,76 @@ namespace AT86RF215 {
             };
         }
         // Setup function to configure values
-        void setupRadioInterruptsConfig(bool syncFail,
+        void setupRadioInterruptsConfig(Transceiver transceiver,
+                                        bool syncFail,
                                         bool txErr,
                                         bool batLow,
                                         bool edComp,
                                         bool txReady,
                                         bool wake) {
-            iqIfSynchronizationFailure09 = syncFail;
-            transceiverError09 = txErr;
-            batteryLow09 = batLow;
-            energyDetectionCompletion09 = edComp;
-            transceiverReady09 = txReady;
-            wakeup09 = wake;
+            if (transceiver == Transceiver::RF09) {
+                iqIfSynchronizationFailure09 = syncFail;
+                transceiverError09 = txErr;
+                batteryLow09 = batLow;
+                energyDetectionCompletion09 = edComp;
+                transceiverReady09 = txReady;
+                wakeup09 = wake;
+            }
+            else {
+                iqIfSynchronizationFailure24 = syncFail;
+                transceiverError24 = txErr;
+                batteryLow24 = batLow;
+                energyDetectionCompletion24 = edComp;
+                transceiverReady24 = txReady;
+                wakeup24 = wake;
+            }
         }
     };
 
     struct GeneralConfiguration {
 
-        /// RFn_CFG
+        /// RF_CFG
         bool irqMaskMode;
         IRQPolarity irqPolarity;
         PadDriverStrength padDriverStrength;
 
         /// RF_BMDVC
         /// Generation of an interrupt if supply voltage (EVDD) drops below the configured threshold level
-        BatteryMonitorVoltageThreshold batteryMonitorVoltage =
-                BatteryMonitorVoltageThreshold::BMHR_292_195;
-        BatteryMonitorHighRange batteryMonitorHighRange =
-                BatteryMonitorHighRange::HIGH_RANGE;
+        BatteryMonitorVoltageThreshold batteryMonitorVoltage;
+        BatteryMonitorHighRange batteryMonitorHighRange;
 
         /// Crystal oscillator - RF_XOC
-        CrystalTrim crystalTrim = CrystalTrim::TRIM_00;
-        bool fastStartUp = false;
+        CrystalTrim crystalTrim;
+        bool fastStartUp;
 
         static struct GeneralConfiguration DefaultGeneralConfig() {
             return {
                     .irqMaskMode = true,
                     .irqPolarity = IRQPolarity::ACTIVE_HIGH,
                     .padDriverStrength = PadDriverStrength::RF_DRV4,
+
+                    .batteryMonitorVoltage = BatteryMonitorVoltageThreshold::BMHR_292_195,
+                    .batteryMonitorHighRange = BatteryMonitorHighRange::HIGH_RANGE,
+
+                    .crystalTrim = CrystalTrim::TRIM_00,
+                    .fastStartUp = false
             };
+        }
+
+        void setup_RF_CFG(bool irq_mask_mode, IRQPolarity irq_polarity, PadDriverStrength pad_driver_strength) {
+            irqMaskMode = irq_mask_mode;
+            irqPolarity = irq_polarity;
+            padDriverStrength = pad_driver_strength;
+        }
+
+        void setup_RF_BMDVC(BatteryMonitorVoltageThreshold battery_monitor_voltage_threshold, BatteryMonitorHighRange battery_monitor_high_range) {
+            batteryMonitorVoltage = battery_monitor_voltage_threshold;
+            batteryMonitorHighRange = battery_monitor_high_range;
+        }
+
+        void setup_RF_XOC(CrystalTrim crystal_trim, bool fast_startup) {
+            crystalTrim = crystal_trim;
+            fastStartUp = fast_startup;
         }
     };
 } // namespace AT86RF215
