@@ -688,7 +688,6 @@ namespace AT86RF215 {
         set_state(transceiver, State::RF_TXPREP, err);
     }
 
-
     void At86rf215::beginBasebandPacketReception(Transceiver transceiver, Error &err) {
         set_state(transceiver, State::RF_TRXOFF, err);
         if (err != Error::NO_ERRORS) {
@@ -718,12 +717,12 @@ namespace AT86RF215 {
         }
 
         // read length
-        uint8_t length = (spi_read_8(regrxflh, err) << 8) | static_cast<uint16_t>(spi_read_8(regrxfll, err));
+        received_packet_length = (spi_read_8(regrxflh, err) << 8) | static_cast<uint16_t>(spi_read_8(regrxfll, err));
         if (err != Error::NO_ERRORS) {
             return;
         }
 
-        spi_block_read_8(regfbrxs, length, received_packet, err);
+        spi_block_read_8(regfbrxs, received_packet_length, received_packet, err);
     }
 
     void At86rf215::set_battery_monitor_control(BatteryMonitorHighRange range, BatteryMonitorVoltageThreshold threshold, Error& err) {
@@ -857,6 +856,15 @@ namespace AT86RF215 {
         if (err != Error::NO_ERRORS) {
             return;
         }
+    }
+
+    bool At86rf215::get_iqSyncStatus(Error& err) {
+        RegisterAddress reg = RegisterAddress::RF_IQIFC2;
+        uint8_t val = spi_read_8(reg, err);
+        if (err != NO_ERRORS) {
+            return false;
+        }
+        return val >> 7;
     }
 
     void At86rf215::setup_crystal(bool fast_start_up, CrystalTrim crystal_trim,
@@ -1474,6 +1482,7 @@ namespace AT86RF215 {
         }
         if ((irq & InterruptMask::BatteryLow) != 0) {
             // Battery Low handling
+            BatteryLow_flag = true;
         }
         if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
             EnergyDetectionCompletion_flag = true;
@@ -1571,6 +1580,7 @@ namespace AT86RF215 {
             TransceiverError_flag = true;
         }
         if ((irq & InterruptMask::BatteryLow) != 0) {
+            BatteryLow_flag = true;
             // Battery Low handling
         }
         if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {

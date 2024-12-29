@@ -252,7 +252,7 @@ namespace AT86RF215 {
          * @param frequencySynthesizerConfig Reference to configuration with frequency, channel mode and bandwidth
          * @param err				         Pointer to raised error
          */
-        void At86rf215::configure_pll(Transceiver transceiver, FrequencySynthesizer& frequencySynthesizerConfig, Error& err);
+        void configure_pll(Transceiver transceiver, FrequencySynthesizer& frequencySynthesizerConfig, Error& err);
 
         /*
          * Gets the part number of the device
@@ -614,6 +614,11 @@ namespace AT86RF215 {
                       SkewAlignment skew_alignment, Error& err);
 
         /**
+         *  Identify whether the IQ interface deserializer is synchronized
+         */
+        bool get_iqSyncStatus(Error& err);
+
+        /**
          * Sets up parameters for received energy tracking
          *
          * @param transceiver				Specifies the transceiver used
@@ -765,6 +770,7 @@ namespace AT86RF215 {
         void packetReceptionBaseband(Transceiver transceiver, Error& err);
 
         uint8_t received_packet[2047]; // buffer for storing received packet in baseband core operation
+        uint16_t received_packet_length = 0;
         int8_t energy_measurement = 0;
 
         // flags for interrupts //
@@ -775,6 +781,7 @@ namespace AT86RF215 {
         bool EnergyDetectionCompletion_flag = false;
         bool TransceiverReady_flag  = false;
         bool Wakeup_flag = false;
+        bool BatteryLow_flag = false;
 
         // baseband core interrupts //
         bool FrameBufferLevelIndication_flag = false;

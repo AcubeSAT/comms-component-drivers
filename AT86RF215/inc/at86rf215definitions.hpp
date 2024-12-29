@@ -408,8 +408,8 @@ namespace AT86RF215 {
     };
 
     enum class AutomaticVoltageExternal {
-        DISABLED = 0x0, ///< Disabled internal supply voltage
-        ENABLED = 0x1,
+        DISABLED = 0x0, ///< Analog voltage provided internally
+        ENABLED = 0x1,  ///< Analog voltage must provided externally (pins AVDD0 and AVDD1)
         INVALID = 0x2,
     };
 
