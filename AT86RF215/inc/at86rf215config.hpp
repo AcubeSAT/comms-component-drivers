@@ -443,7 +443,7 @@ namespace AT86RF215 {
 
         static FrequencySynthesizer DefaultFrequencySynthesizerConfig() {
             FrequencySynthesizer fs;
-            fs.setup_FrequencySynthesizer(Transceiver::RF09, 43650, PLLChannelMode::FineResolution450, PLLBandwidth::BWDefault);
+            fs.setup_FrequencySynthesizer(Transceiver::RF09, 436500, PLLChannelMode::FineResolution450, PLLBandwidth::BWDefault);
             fs.setup_FrequencySynthesizer(Transceiver::RF24, 2425000, PLLChannelMode::FineResolution2443, PLLBandwidth::BWDefault);
             return fs;
         }

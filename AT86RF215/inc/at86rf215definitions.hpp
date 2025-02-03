@@ -461,8 +461,8 @@ namespace AT86RF215 {
     };
 
     enum class BatteryMonitorStatus {
-        LOW_ENABLED = 0x0,
-        HIGH_ENABLED = 0x1,
+        BELOW_THRESHOLD = 0x0,
+        ABOVE_THRESHOLD = 0x1,
     };
 
     enum class HighRateLegacyOQPSK {
