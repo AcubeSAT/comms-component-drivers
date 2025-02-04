@@ -68,8 +68,8 @@ namespace TMP117 {
          */
         bool thermalAlert;
         /**
-         * 0: Active High
-         * 1: Active Low
+         * 0: Active Low
+         * 1: Active High
          */
         bool polarityAlert;
         /**
