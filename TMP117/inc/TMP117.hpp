@@ -132,7 +132,7 @@ namespace TMP117 {
         etl::pair<Error, std::optional<float>> setCalibrationOffset(float calibration);
 
         /**
-         * Sets the sensor's offset for calibration offset.
+         * Gets the sensor's calibration offset.
          * @return calibration temperature in Celsius (allowable range [-256, 256] C).
          */
         etl::pair<Error, float> getCalibrationOffset();
