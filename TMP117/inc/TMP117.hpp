@@ -163,8 +163,6 @@ namespace TMP117 {
          */
         Error writeEEPROM(uint8_t eepromRegister, uint16_t value);
 
-        //GIT MONTA
-
         /**
          * Reads from the chip programmable memory.
          * @param eepromRegister         Checks which register to read from. Valid values from 1-3 corresponding to the EEPROM registers
@@ -193,15 +191,11 @@ namespace TMP117 {
         /**
          * Gets the temperature of the sensor.
          *
-         * @param ignoreAlert   Declares whether for temperatures outside the predefined range an error is raised or not
          * @note This directly reads from the configuration registers and clears any alert flag
          *
-         * @warning If set on ALERT mode this will return an error if any error (HIGH/LOW temperature) has been raised in the
-         * meantime. To ignore the transients set the temperature to THERM or simply set the ignoreAlert
-         *
-         * @return Measured temperature in Celsius scale
+         * @return Measured temperature in Celsius scale and an Error. If no error occurred the returned error value will be NoErrors. getTemperature() will perform a One-Shot conversion if called while in Shut-Down mode.
          */
-        etl::pair<Error, float> getTemperature(bool ignoreAlert);
+        etl::pair<Error, float> getTemperature();
 
         /**
          * For testing purposes. Returns revision number.

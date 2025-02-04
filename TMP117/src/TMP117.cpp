@@ -1,4 +1,10 @@
 #include "TMP117.hpp"
+
+#include <ina3221.hpp>
+
+#include  "FreeRTOS.h"
+#include "task.h"
+
 namespace TMP117 {
 
     etl::pair<Error, std::optional<uint16_t>> TMP117::readRegister(RegisterAddress targetRegister) {
@@ -154,7 +160,7 @@ namespace TMP117 {
     }
 
 
-    etl::pair<Error, float> TMP117::getTemperature(bool ignoreAlert = false) {
+    etl::pair<Error, float> TMP117::getTemperature() {
 
         auto offset = getCalibrationOffset();
 
@@ -170,16 +176,6 @@ namespace TMP117 {
             return etl::make_pair(error, NULL);
         }
 
-        if (!ignoreAlert) {
-            if (reg.value() & 0x8000) {
-                return etl::make_pair(Error::TemperatureHigh, NULL);
-            }
-
-            if (reg.value() & 0x4000) {
-                return etl::make_pair(Error::TemperatureLow, NULL);
-            }
-        }
-
         // Continuous mode
         if (((reg.value() >> 10) & 0x3) == 0x0 || ((reg.value() >> 10) & 0x3) == 0x2) {
             auto[error, reg] = readRegister(RegisterAddress::TemperatureRegister);
@@ -193,8 +189,8 @@ namespace TMP117 {
             );
         }
 
-        // One-shot mode
-        if (((reg.value() >> 10) & 0x3) == 0x3) {
+        // One-shot mode or Shut-down mode
+        if (const uint16_t mode = (reg.value() >> 10) & 0x3; mode == 0x3 || mode == 0x1) {
             // Set MOD[1:0] bits to 11,in order initiate one-shot conversion
             auto[error, config] = readRegister(RegisterAddress::ConfigurationRegister);
             if (error != NoErrors){
@@ -207,7 +203,11 @@ namespace TMP117 {
             uint16_t timeout = MaxTimeoutDelay;
 
             while (timeout > 0) {
-                HAL_Delay(TimeoutWait);
+                #if defined(INC_FREERTOS_H)
+                    vTaskDelay(pdMS_TO_TICKS(7));
+                #else
+                    HAL_Delay(7);
+                #endif
                 timeout -= TimeoutWait;
                 auto [error, reg] = readRegister(RegisterAddress::ConfigurationRegister);
                 if (error != NoErrors) {
@@ -227,8 +227,8 @@ namespace TMP117 {
                     );
                 }
             }
-
         }
+
         return etl::make_pair(
                 Timeout,
                 NULL
