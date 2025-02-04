@@ -245,12 +245,6 @@ namespace TMP117 {
         return etl::make_pair(Error::NoErrors, reg.value() & 0xFFF);
     }
 
-
-    void TMP117::handleIRQ(void) {
-        /// The ALERT functionality is not going to be implemented for this version of the sensor since we simply need
-        /// to poll the driver. All the alerts are handled there
-    }
-
     Error TMP117::configure() {
         auto [offsetCalibrationError,val] = setCalibrationOffset(configuration.temperatureOffset);
         uint16_t config =

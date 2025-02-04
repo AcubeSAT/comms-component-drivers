@@ -207,10 +207,5 @@ namespace TMP117 {
          * For testing purposes. Returns the device ID.
          */
         etl::pair<Error, uint16_t> getDeviceID();
-
-        /**
-         * Handles raised interrupts
-         */
-        void handleIRQ(void);
     };
 }
