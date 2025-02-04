@@ -289,6 +289,11 @@ namespace INA3221 {
         bool singleShot() const;
 
         /**
+         * @return true if the current operating mode is kj, false otherwise
+         */
+        bool powerDown() const;
+
+        /**
          * Get Bus and Shunt voltage measurement in uV, Current measurement in uA, and Power in mW of all channels
          *
          * @return pair of measurement; first is the bus voltage and second the shunt voltage

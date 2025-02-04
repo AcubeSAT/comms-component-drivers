@@ -56,14 +56,23 @@ namespace INA3221 {
     }
 
     etl::expected<void, Error> INA3221::changeOperatingMode(OperatingMode operatingMode) {
+        if (auto err = writeRegisterField(Register::CONFG, to_underlying(operatingMode), 0x7, 0); !err.has_value()) {
+            return err;
+        }
+
         config.operatingMode = operatingMode;
-        return writeRegisterField(Register::CONFG, to_underlying(operatingMode), 0x7, 0);
+        return {};
     }
 
     bool INA3221::singleShot() const {
         return config.operatingMode == OperatingMode::SHUNT_VOLTAGE_SS or
                config.operatingMode == OperatingMode::BUS_VOLTAGE_SS or
                config.operatingMode == OperatingMode::SHUNT_BUS_VOLTAGE_SS;
+    }
+
+    bool INA3221::powerDown() const {
+        return config.operatingMode == OperatingMode::POWER_DOWN or
+               config.operatingMode == OperatingMode::POWER_DOWN_REND;
     }
 
     bool INA3221::busEnabled() const {
@@ -81,7 +90,7 @@ namespace INA3221 {
     }
 
     etl::expected<ChannelMeasurement, Error> INA3221::getMeasurement() {
-        if (singleShot()) {
+        if (singleShot() || powerDown()) {
             // trigger measurement when on single shot mode
             changeOperatingMode(config.operatingMode);
 

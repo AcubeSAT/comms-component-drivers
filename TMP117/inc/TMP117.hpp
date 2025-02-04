@@ -213,6 +213,5 @@ namespace TMP117 {
          * @return      Formatted value
          */
         float convertTemperature(uint16_t temp);
-
     };
 }
