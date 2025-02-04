@@ -80,11 +80,31 @@ namespace TMP117 {
     };
 
     class TMP117 {
+    public:
+        TMP117() = default;
+
+        /**
+         * Constructor wrapper init function
+         * @param hi2c1         I2C definition
+         * @param address       Address of device in the I2C bus
+         * @param config        Used for setting up the configuration register
+         */
+        etl::pair<Error, TMP117> Init(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config);
+
+        /**
+         * Driver for TMP117 sensor
+         * @param hi2c1         I2C definition
+         * @param address       Address of device in the I2C bus
+         * @param config        Used for setting up the configuration register
+         */
+        TMP117(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config) :
+                hi2c1(hi2c1), i2cSlaveAddress(address), configuration(std::move(config)) {
+            configure();
+        };
     private:
         static constexpr uint16_t MaxTimeoutDelay = 100;
         static constexpr uint8_t TimeoutWait = 10;
         static constexpr uint16_t MaxAbsoluteCalibrationOffset = 256;
-
 
         /**
          * HAL I2C handle
@@ -106,7 +126,6 @@ namespace TMP117 {
          */
         uint8_t revisionNumber = 0x00;
 
-    public:
         float temperaturePrecision = 0.0078125;
 
         /**
@@ -114,17 +133,7 @@ namespace TMP117 {
          */
         Config configuration;
 
-        /**
-         * Driver for TMP117 sensor
-         * @param hi2c1         I2C definition
-         * @param address       Address of device in the I2C bus
-         * @param config        Used for setting up the configuration register
-         */
-        TMP117(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config) :
-                hi2c1(hi2c1), i2cSlaveAddress(address), configuration(std::move(config)) {
-            configure();
-        };
-
+    public:
         /**
          * Sets the sensor's offset for calibration offset.
          * @return calibration temperature in Celsius (allowable range [-256, 256] C).
@@ -137,7 +146,25 @@ namespace TMP117 {
          */
         etl::pair<Error, float> getCalibrationOffset();
 
+        /**
+         * Gets the temperature of the sensor.
+         *
+         * @note This directly reads from the configuration registers and clears any alert flag
+         *
+         * @return Measured temperature in Celsius scale and an Error. If no error occurred the returned error value will be NoErrors. getTemperature() will perform a One-Shot conversion if called while in Shut-Down mode.
+         */
+        etl::pair<Error, float> getTemperature();
 
+        /**
+         * For testing purposes. Returns revision number.
+         */
+        etl::pair<Error, uint16_t> getRevNumber();
+
+        /**
+         * For testing purposes. Returns the device ID.
+         */
+        etl::pair<Error, uint16_t> getDeviceID();
+    private:
         /**
          * Reads a register with I2C
          *
@@ -180,7 +207,6 @@ namespace TMP117 {
          */
         Error configure();
 
-
         /**
          * Converts the temperature from a 16bit value into a float representing a temperature in the range -+ 256 [C]
          * @param temp  Raw temperature value
@@ -188,24 +214,5 @@ namespace TMP117 {
          */
         float convertTemperature(uint16_t temp);
 
-        /**
-         * Gets the temperature of the sensor.
-         *
-         * @note This directly reads from the configuration registers and clears any alert flag
-         *
-         * @return Measured temperature in Celsius scale and an Error. If no error occurred the returned error value will be NoErrors. getTemperature() will perform a One-Shot conversion if called while in Shut-Down mode.
-         */
-        etl::pair<Error, float> getTemperature();
-
-        /**
-         * For testing purposes. Returns revision number.
-         */
-
-        etl::pair<Error, uint16_t> getRevNumber();
-
-        /**
-         * For testing purposes. Returns the device ID.
-         */
-        etl::pair<Error, uint16_t> getDeviceID();
     };
 }

@@ -6,6 +6,14 @@
 #include "task.h"
 
 namespace TMP117 {
+    etl::pair<Error, TMP117> TMP117::Init(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config) {
+        TMP117 sensor(hi2c1, address, config);
+        if (Error err = configure(); err != NoErrors) {
+            return etl::make_pair(err, TMP117());
+        }
+
+        return etl::make_pair(NoErrors, sensor);
+    }
 
     etl::pair<Error, std::optional<uint16_t>> TMP117::readRegister(RegisterAddress targetRegister) {
         uint8_t target_reg = static_cast<uint8_t>(targetRegister);
@@ -247,6 +255,8 @@ namespace TMP117 {
 
     Error TMP117::configure() {
         auto [offsetCalibrationError,val] = setCalibrationOffset(configuration.temperatureOffset);
+        if (offsetCalibrationError != NoErrors) { return offsetCalibrationError; }
+
         uint16_t config =
                 (static_cast<uint16_t>(configuration.conversionMode) << 10) |
                 ((configuration.cycleTime & 0x7) << 7) |
@@ -254,10 +264,6 @@ namespace TMP117 {
                 (configuration.thermalAlert << 4) |
                 (configuration.polarityAlert << 3) |
                 (configuration.drAlert << 2);
-        Error configurationError = writeRegister(RegisterAddress::ConfigurationRegister, config);
-
-        if (offsetCalibrationError != NoErrors) { return offsetCalibrationError;}
-        if (configurationError != NoErrors) { return configurationError;}
-        return NoErrors;
+        return writeRegister(RegisterAddress::ConfigurationRegister, config);
     }
 }
