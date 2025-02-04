@@ -163,6 +163,8 @@ namespace TMP117 {
          */
         Error writeEEPROM(uint8_t eepromRegister, uint16_t value);
 
+        //GIT MONTA
+
         /**
          * Reads from the chip programmable memory.
          * @param eepromRegister         Checks which register to read from. Valid values from 1-3 corresponding to the EEPROM registers
