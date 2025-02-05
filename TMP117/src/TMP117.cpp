@@ -6,15 +6,6 @@
 #include "task.h"
 
 namespace TMP117 {
-    etl::pair<Error, TMP117> TMP117::Init(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config) {
-        TMP117 sensor(hi2c1, address, config);
-        if (Error err = configure(); err != NoErrors) {
-            return etl::make_pair(err, TMP117());
-        }
-
-        return etl::make_pair(NoErrors, sensor);
-    }
-
     etl::pair<Error, std::optional<uint16_t>> TMP117::readRegister(RegisterAddress targetRegister) {
         uint8_t target_reg = static_cast<uint8_t>(targetRegister);
         uint8_t buf[2];
@@ -265,5 +256,15 @@ namespace TMP117 {
                 (configuration.polarityAlert << 3) |
                 (configuration.drAlert << 2);
         return writeRegister(RegisterAddress::ConfigurationRegister, config);
+    }
+
+    etl::pair<Error, TMP117> Create(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config) {
+        Error err;
+        TMP117 sensor(hi2c1, address, config, err);
+        if (err != NoErrors) {
+            return std::make_pair(err, TMP117());
+        }
+
+        return std::make_pair(NoErrors, sensor);
     }
 }

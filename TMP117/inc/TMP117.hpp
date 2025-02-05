@@ -6,10 +6,9 @@
 #include "etl/utility.h"
 
 namespace TMP117 {
-
-/**
-    The device I2C addresses (Page 21 TMP117 manual)
-*/
+    /**
+        The device I2C addresses (Page 21 TMP117 manual)
+    */
     enum I2CAddress {
         Address1 = 0x90, /// Connected to Ground
         Address2 = 0x92, /// Connected to VCC
@@ -17,9 +16,9 @@ namespace TMP117 {
         Address4 = 0x96 /// Connected to SCL
     };
 
-/**
-    Register addresses
-*/
+    /**
+        Register addresses
+    */
     enum RegisterAddress {
         TemperatureRegister = 0x00,
         ConfigurationRegister = 0x01,
@@ -82,14 +81,17 @@ namespace TMP117 {
     class TMP117 {
     public:
         TMP117() = default;
-
         /**
-         * Constructor wrapper init function
+         * Driver for TMP117 sensor
          * @param hi2c1         I2C definition
          * @param address       Address of device in the I2C bus
          * @param config        Used for setting up the configuration register
+         * @param err           Used to return a potential error during configuration
          */
-        etl::pair<Error, TMP117> Init(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config);
+        TMP117(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config, Error& err) :
+                hi2c1(hi2c1), i2cSlaveAddress(address), configuration(std::move(config)) {
+            err = configure();
+        };
 
         /**
          * Driver for TMP117 sensor
@@ -214,4 +216,16 @@ namespace TMP117 {
          */
         float convertTemperature(uint16_t temp);
     };
+
+    /**
+     * @brief TMP117 constructor wrapper function. Creates a TMP117 object and either returns with the corresponding error value that was produced upon creation.
+     *
+     * @param hi2c1         I2C definition
+     * @param address       Address of device in the I2C bus
+     * @param config        Used for setting up the configuration register
+     * @param err           Used to return a potential error during configuration
+     *
+     * @return              A pair of an Error and a TMP117 object
+     */
+    etl::pair<Error, TMP117> Create(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config, Error& err);
 }
