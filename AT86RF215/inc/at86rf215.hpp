@@ -40,7 +40,7 @@ public:
 	 *
 	 */
 	AT86RF215(SPI_HandleTypeDef *hspim, const AT86RF215Configuration&& config) :
-			hspi(hspim), config(std::move(config)), tx_ongoing(false), rx_ongoing(false),
+			hspi(hspim), config(std::move(config)), /*tx_ongoing(false),*/ rx_ongoing(false),
 			agc_held(false) {
 	};
 
@@ -358,15 +358,20 @@ public:
 	TxRelativeCutoffFrequency get_relative_cutoff_freq(Transceiver transceiver,
 			Error &err);
 
-	/*
-	 * Set whether direct modulation is used in the TX chain.
-	 * Only available for baseband FSK and OQPSK)
-	 *
-	 * @param transceiver		Specifies the transceiver used
-	 * @oaram dmod				Indicates whether direct modulation is used
-	 * @param err				Pointer to raised error
-	 */
-	void set_direct_modulation(Transceiver transceiver, bool dmod, Error &err);
+    /*
+     * Set whether direct modulation is used in the TX chain.
+     * Only available for baseband FSK and OQPSK)
+     * Look table 6-57 for fsk pre-emphasis configuration values
+     *
+     * @param transceiver		Specifies the transceiver used
+     * @oaram dmod				Indicates whether direct modulation is used
+     * @param enablePE          Indicates whether preemphasis filetring is used (relevant for fsk only)
+     * @param configPE0         Config information for  BBCn_FSKPE0
+     * @param configPE1         Config information for  BBCn_FSKPE1
+     * @param configPE2         Config information for  BBCn_FSKPE2
+     * @param err				Pointer to raised error
+     */
+    void set_direct_modulation(Transceiver transceiver, bool dmod, bool enablePE, uint8_t configPE0, uint8_t  configPE1, uint8_t configPE2, Error &err);
 
 	/*
 	 * Get whether direct modulation is used in the TX chain.
@@ -851,7 +856,7 @@ public:
 	 * @param err				Pointer to raised error
 	 * @return rssi				Received Signal Strength
 	 */
-	uint8_t get_rssi(Transceiver transceiver, Error &err);
+	int8_t get_rssi(Transceiver transceiver, Error &err);
 
 	/*
 	 * Set receiver energy detection average duration given by df*dtb
@@ -1111,9 +1116,14 @@ public:
 	 */
 	void transmitBasebandPacketsRx(Transceiver transceiver, Error &err);
 
+    void transmitPacketsIQ(Transceiver transceiver, bool embeddedControl, Error &err);
+
 
 	uint8_t received_packet[2047];
-    uint8_t energy_measurement = 0;
+    int8_t energy_measurement = 0;
+    bool got_rxfs = false;
+    bool got_rxfe = false;
+    bool got_stateRX = false;
 
 private:
 
@@ -1125,13 +1135,17 @@ private:
     void packetReception(Transceiver transceiver, Error &err);
 
     /// Flag indicating that a TX procedure is ongoing
-    bool tx_ongoing;
+    static inline bool tx_ongoing = false;
     /// Flag indicating that an RX procedure is ongoing
     bool rx_ongoing;
     /// Flag indicating that the Clean Channel Assessment procedure is ongoing
     bool cca_ongoing;
     /// Flag for checking whether the AGC is locked
     bool agc_held;
+    /// Flag indicating that an IQ TX procedure is ongoing
+    static inline bool iq_tx_ongoing = false;
+    /// Flag indicating that the IQ procedure is controlled manually or by the I/Q frame control bits
+    static inline bool embedded_control = false;
 
 	SPI_HandleTypeDef *hspi;
 };

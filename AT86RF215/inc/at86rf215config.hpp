@@ -10,8 +10,11 @@ struct AT86RF215Configuration {
 			ReceiverEnergyDetectionAveragingDuration::REDAD_8U;
 	ReceiverBandwidth receiverBandwidth =
 			ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
-	RxRelativeCutoffFrequency rxRelativeCutoffFrequency =
-			RxRelativeCutoffFrequency::FCUT_025;
+//	RxRelativeCutoffFrequency rxRelativeCutoffFrequency =
+//			RxRelativeCutoffFrequency::FCUT_025;
+    RxRelativeCutoffFrequency rxRelativeCutoffFrequency =
+            RxRelativeCutoffFrequency::FCUT_0375;
+
 	ReceiverSampleRate receiverSampleRate = ReceiverSampleRate::FS_4000;
 	HighRateLegacyOQPSK highRateLegacyOQPSK = HighRateLegacyOQPSK::HDRL_DISABLED;
 	SFDSearchSpace sfdSearchSpace = SFDSearchSpace::NSFD1;
@@ -64,29 +67,35 @@ struct AT86RF215Configuration {
 
 	// TX Front-end
 	PowerAmplifierRampTime powerAmplifierRampTime09 =
-			PowerAmplifierRampTime::RF_PARAMP4U;
+			PowerAmplifierRampTime::RF_PARAMP32U;
 	PowerAmplifierRampTime powerAmplifierRampTime24 =
 			PowerAmplifierRampTime::RF_PARAMP4U;
 	TransmitterCutOffFrequency transmitterCutOffFrequency09 =
-			TransmitterCutOffFrequency::RF_FLC500KHZ;
+			TransmitterCutOffFrequency::RF_FLC80KHZ;
+//	TransmitterCutOffFrequency transmitterCutOffFrequency24 =
+//			TransmitterCutOffFrequency::RF_FLC500KHZ;
 	TransmitterCutOffFrequency transmitterCutOffFrequency24 =
-			TransmitterCutOffFrequency::RF_FLC500KHZ;
+			TransmitterCutOffFrequency::RF_FLC1000KHZ;
 	TxRelativeCutoffFrequency txRelativeCutoffFrequency09 =
-			TxRelativeCutoffFrequency::FCUT_025;
+			TxRelativeCutoffFrequency::FCUT_0375;
+//	TxRelativeCutoffFrequency txRelativeCutoffFrequency24 =
+//			TxRelativeCutoffFrequency::FCUT_025;
 	TxRelativeCutoffFrequency txRelativeCutoffFrequency24 =
-			TxRelativeCutoffFrequency::FCUT_025;
-	bool directModulation09 = false;
+			TxRelativeCutoffFrequency::FCUT_1;
+	bool directModulation09 = false;                  // Direct modulation must be kept off
 	bool directModulation24 = false;
-	TransmitterSampleRate transceiverSampleRate09 =
-			TransmitterSampleRate::FS_4000;
-	TransmitterSampleRate transceiverSampleRate24 =
-			TransmitterSampleRate::FS_4000;
+	TransmitterSampleRate transceiverSampleRate09 =   // Do not change this
+			TransmitterSampleRate::FS_400;
+//	TransmitterSampleRate transceiverSampleRate24 =
+//			TransmitterSampleRate::FS_4000;
+    TransmitterSampleRate transceiverSampleRate24 =
+            TransmitterSampleRate::FS_4000_3;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl09 =
 			PowerAmplifierCurrentControl::PA_NO;
 	PowerAmplifierCurrentControl powerAmplifierCurrentControl24 =
 			PowerAmplifierCurrentControl::PA_NO;
-	uint8_t txOutPower09 = 0x1F;
-	uint8_t txOutPower24 = 0x1F;
+	uint8_t txOutPower09 = 0x0;
+	uint8_t txOutPower24 = 0x0;
 	ExternalLNABypass externalLNABypass09 = ExternalLNABypass::FALSE;
 	ExternalLNABypass externalLNABypass24 = ExternalLNABypass::FALSE;
 	AutomaticGainControlMAP automaticGainControlMAP09 =
@@ -109,13 +118,13 @@ struct AT86RF215Configuration {
 	bool ifInversion24 = false;
 	bool ifShift09 = false;
 	bool ifShift24 = false;
-	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
+	ReceiverBandwidth rxBandwidth09 = ReceiverBandwidth::RF_BW200KHZ_IF250KHZ;
 	ReceiverBandwidth rxBandwidth24 = ReceiverBandwidth::RF_BW2000KHZ_IF2000KHZ;
 	RxRelativeCutoffFrequency rxRelativeCutoffFrequency09 =
-			RxRelativeCutoffFrequency::FCUT_025;
+			RxRelativeCutoffFrequency::FCUT_0375;
 	RxRelativeCutoffFrequency rxRelativeCutoffFrequency24 =
 			RxRelativeCutoffFrequency::FCUT_025;
-	ReceiverSampleRate receiverSampleRate09 = ReceiverSampleRate::FS_4000;
+	ReceiverSampleRate receiverSampleRate09 = ReceiverSampleRate::FS_400;  // Do not change this
 	ReceiverSampleRate receiverSampleRate24 = ReceiverSampleRate::FS_4000;
 	bool agcInput09 = false;
 	bool agcInput24 = false;
@@ -125,18 +134,20 @@ struct AT86RF215Configuration {
 			AverageTimeNumberSamples::AVGS_8;
 	bool agcEnabled09 = true;
 	bool agcEnabled24 = true;
-	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB42;
+	AutomaticGainTarget automaticGainControlTarget09 = AutomaticGainTarget::DB30;
 	AutomaticGainTarget automaticGainControlTarget24 = AutomaticGainTarget::DB42;
-	uint8_t gainControlWord09 = 0x17;
+	uint8_t gainControlWord09 = 0x23;
 	uint8_t gainControlWord24 = 0x17;
 
 	// IQ Interface
 	ExternalLoopback externalLoopback = ExternalLoopback::DISABLED;
 	IQOutputCurrent iqOutputCurrent = IQOutputCurrent::CURR_2_MA;
 	IQmodeVoltage iqmodeVoltage = IQmodeVoltage::MODE_200_MV;
-	IQmodeVoltageIEE iqmodeVoltageIEE = IQmodeVoltageIEE::CMV;
+//	IQmodeVoltageIEE iqmodeVoltageIEE = IQmodeVoltageIEE::CMV;
+	IQmodeVoltageIEE iqmodeVoltageIEE = IQmodeVoltageIEE::IEEE;
 	EmbeddedControlTX embeddedControlTX = EmbeddedControlTX::DISABLED;
-	ChipMode chipMode = ChipMode::RF_MODE_BBRF;
+    ChipMode chipMode = ChipMode::RF_MODE_BBRF;
+//	ChipMode chipMode = ChipMode::RF_MODE_RF;
 	SkewAlignment skewAlignment = SkewAlignment::SKEW3906NS;
 
 	// Baseband Core
@@ -152,9 +163,17 @@ struct AT86RF215Configuration {
 	bool baseBandEnable09 = true;
 	bool baseBandEnable24 = true;
 	PhysicalLayerType physicalLayerType09 = PhysicalLayerType::BB_MRFSK;
-	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_OFF;
+	PhysicalLayerType physicalLayerType24 = PhysicalLayerType::BB_MRFSK;
+    bool enablePE09 = false;      // Relevant when direct modulation is on. Keep them false.
+    bool enablePE24 = false;
+    uint8_t configPE0_09 = 0x13;  // preemphasis filter settings (table 6-57)
+    uint8_t configPE1_09 = 0x29;
+    uint8_t configPE2_09 = 0xC7;
+    uint8_t configPE0_24 = 0x13;
+    uint8_t configPE1_24 = 0x29;
+    uint8_t configPE2_24 = 0xC7;
 
-	// Enabled Interrupts
+    // Enabled Interrupts
 
 	// Baseband IRQ
     // All interrupts enabled
