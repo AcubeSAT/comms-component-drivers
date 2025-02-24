@@ -1,6 +1,6 @@
 #include "eMMC.hpp"
 
-#include <Platform/Inc/PlatformParameters.hpp>
+// #include <Platform/Inc/PlatformParameters.hpp>
 
 using namespace eMMC;
 extern MMC_HandleTypeDef hmmc1;
@@ -72,7 +72,7 @@ void eMMC::eMMCMemoryInit() {
         }
     }
     float eMMC_usage = (100 * static_cast<float>(headPointer)) / static_cast<float>(memoryCapacity);
-    COMMSParameters::EMMC_USAGE.setValue(eMMC_usage);
+    // COMMSParameters::EMMC_USAGE.setValue(eMMC_usage);
     if (memoryMap[0].endAddress != 0) {
         __NOP();
     }
