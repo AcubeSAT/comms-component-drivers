@@ -257,14 +257,4 @@ namespace TMP117 {
                 (configuration.drAlert << 2);
         return writeRegister(RegisterAddress::ConfigurationRegister, config);
     }
-
-    etl::pair<Error, TMP117> Create(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config) {
-        Error err;
-        TMP117 sensor(hi2c1, address, config, err);
-        if (err != NoErrors) {
-            return std::make_pair(err, TMP117());
-        }
-
-        return std::make_pair(NoErrors, sensor);
-    }
 }

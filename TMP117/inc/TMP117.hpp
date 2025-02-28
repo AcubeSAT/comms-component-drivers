@@ -80,19 +80,6 @@ namespace TMP117 {
 
     class TMP117 {
     public:
-        TMP117() = default;
-        /**
-         * Driver for TMP117 sensor
-         * @param hi2c1         I2C definition
-         * @param address       Address of device in the I2C bus
-         * @param config        Used for setting up the configuration register
-         * @param err           Used to return a potential error during configuration
-         */
-        TMP117(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config, Error& err) :
-                hi2c1(hi2c1), i2cSlaveAddress(address), configuration(std::move(config)) {
-            err = configure();
-        };
-
         /**
          * Driver for TMP117 sensor
          * @param hi2c1         I2C definition
@@ -216,16 +203,4 @@ namespace TMP117 {
          */
         float convertTemperature(uint16_t temp);
     };
-
-    /**
-     * @brief TMP117 constructor wrapper function. Creates a TMP117 object and either returns with the corresponding error value that was produced upon creation.
-     *
-     * @param hi2c1         I2C definition
-     * @param address       Address of device in the I2C bus
-     * @param config        Used for setting up the configuration register
-     * @param err           Used to return a potential error during configuration
-     *
-     * @return              A pair of an Error and a TMP117 object
-     */
-    etl::pair<Error, TMP117> Create(I2C_HandleTypeDef &hi2c1, I2CAddress address, const Config &config, Error& err);
 }
