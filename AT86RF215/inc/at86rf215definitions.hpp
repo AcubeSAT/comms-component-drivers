@@ -2,7 +2,7 @@
 
 namespace AT86RF215 {
     /// RFn_STATE
-    enum State {
+    enum class State {
         RF_NOP = 0x0,
         RF_SLEEP = 0x1,
         RF_TRXOFF = 0x2,

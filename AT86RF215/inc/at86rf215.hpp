@@ -1,20 +1,20 @@
 #pragma once
 
-#include <at86rf215definitions.hpp>
-#include "at86rf215config.hpp"
 #include <utility>
 #include <cstdint>
-#include <etl/expected.h>
+#include "etl/expected.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+#include "Logger.hpp"
+#include "at86rf215definitions.hpp"
+#include "at86rf215config.hpp"
 
-const uint16_t TIMEOUT = 1000;
+constexpr uint16_t TIMEOUT = 1000;
 typedef struct __SPI_HandleTypeDef SPI_HandleTypeDef;
 
 namespace AT86RF215 {
-
-
-    // Declare the transceiver object
-
-    enum Error {
+    enum class Error {
         NO_ERRORS,
         FAILED_WRITING_TO_REGISTER,
         FAILED_READING_FROM_REGISTER,
@@ -30,13 +30,13 @@ namespace AT86RF215 {
         ONGOING_TRANSMISSION_RECEPTION,
     };
 
-
-    inline uint8_t operator&(uint8_t a, InterruptMask b) {
+    inline uint8_t operator&(const uint8_t a, InterruptMask b) {
         return a & static_cast<uint8_t>(b);
     }
 
     class At86rf215 {
     public:
+        /// Structs with register configurations
         GeneralConfiguration generalConfig;
         RXConfig rxConfig;
         TXConfig txConfig;
@@ -46,24 +46,65 @@ namespace AT86RF215 {
         BasebandCoreInterruptsConfig basebandCoreInterruptsConfig;
         RadioInterruptsConfig radioInterruptsConfig;
         IQInterfaceConfig iqInterfaceConfig;
-        /// Flag indicating that a TX procedure is ongoing (with baseband core)
-        bool tx_ongoing;
-        /// Flag indicating that an RX procedure is ongoing (with baseband core)
-        bool rx_ongoing;
-        /// Flag indicating that the Clean Channel Assessment procedure is ongoing
-        bool cca_ongoing;
-        SPI_HandleTypeDef* hspi;
 
-        /*
+        /// Flags indicating that a TX procedure is ongoing. For baseband core operations
+        /// these are handled automatically, but must be manually set/reset during I/Q mode
+        /// operations.
+        bool tx_ongoing_09;
+        bool tx_ongoing_24;
+        /// Flags indicating that an RX procedure is ongoing. For baseband core operations
+        /// and clear channel assessment these are handled automatically, but must be manually
+        /// set/reset during I/Q mode operations.
+        bool rx_ongoing_09;
+        bool rx_ongoing_24;
+        /// Flags indicating that the Clear Channel Assessment procedure is ongoing
+        bool cca_ongoing_09;
+        bool cca_ongoing_24;
+
+        /// To avoid concurrent access, the user of this driver should take the semaphore first
+        SemaphoreHandle_t resources_mtx;
+
+        /// Buffer for storing a received packet in baseband core operation
+        uint8_t received_packet[2047];
+        /// Received packet's length in baseband core operation
+        uint16_t received_packet_length = 0;
+        /// Result of a clear channel assessment is stored here
+        int8_t energy_measurement = 0;
+
+        /// Flags indicating a radio interrupt has occurred (offered for debugging purposes, must be manually reset)
+        bool IFSynchronization_flag = false;
+        bool TransceiverError_flag = false;
+        bool EnergyDetectionCompletion_flag = false;
+        bool TransceiverReady_flag  = false;
+        bool Wakeup_flag = false;
+        bool BatteryLow_flag = false;
+
+        /// Flags indicating a baseband core interrupt has occurred (offered for debugging purposes, must be manually reset)
+        bool FrameBufferLevelIndication_flag = false;
+        bool AGCRelease_flag = false;
+        bool AGCHold_flag = false;
+        bool TransmitterFrameEnd_flag = false;
+        bool ReceiverExtendMatch_flag = false;
+        bool ReceiverAddressMatch_flag = false;
+        bool ReceiverFrameEnd_flag = false;
+        bool ReceiverFrameStart_flag = false;
+
+        /**
          * Initializer for AT86RF215
          *
-         * @param hspi: pointer to the SPI_HandleTypeDef responsible for configuring the SPI.
+         * @param hspim: pointer to the SPI_HandleTypeDef responsible for configuring the SPI.
          *
          */
         // Constructor with general config only
         At86rf215(SPI_HandleTypeDef* hspim)
-                : hspi(hspim),
-                  tx_ongoing(false), rx_ongoing(false), cca_ongoing(false) {}
+                : tx_ongoing_09(false), tx_ongoing_24(false), rx_ongoing_09(false),
+                  rx_ongoing_24(false), cca_ongoing_09(false), cca_ongoing_24(false), hspi(hspim) {
+            // Initialize the semaphore
+            resources_mtx = xSemaphoreCreateMutexStatic(&mtx_buf);
+            if (resources_mtx == nullptr) {
+                LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphore";
+            }
+        }
 
         void setGeneralConfig(GeneralConfiguration&& GeneralConfig) {
             generalConfig = std::move(GeneralConfig);
@@ -92,7 +133,9 @@ namespace AT86RF215 {
         void setIQInterfaceConfig(IQInterfaceConfig&& IQInterfaceConfig) {
             iqInterfaceConfig = std::move(IQInterfaceConfig);
         }
-        /* Writes a byte to a specified address
+
+        /**
+         * Writes a byte to a specified address
          *
          * @param address	Specifies the address to write to
          * @param value		The value to write to the specified address
@@ -100,16 +143,17 @@ namespace AT86RF215 {
          */
         void spi_write_8(uint16_t address, uint8_t value, Error& err);
 
-        /* Reads a byte to a specified address
+        /**
+         * Reads a byte to a specified address
          *
          * @param address	Specifies the address to read from
          * @param err		Pointer to raised error
          * @returns 		Returns the read byte
          */
         uint8_t spi_read_8(uint16_t address, Error& err);
-        int8_t int_spi_read_8(uint16_t address, Error& err);
 
-        /* Writes a byte to a specified address
+        /**
+         * Writes a byte to a specified address
          *
          * @param address	Specifies the address to start writing to
          * @param n			Number of bytes to write
@@ -119,7 +163,8 @@ namespace AT86RF215 {
         void spi_block_write_8(uint16_t address, uint16_t n, uint8_t* value,
                                Error& err);
 
-        /* Reads a byte to a specified address. Assumes that the caller has
+        /**
+         * Reads a byte to a specified address. Assumes that the caller has
          * allocated the expected memory.
          *
          * @param address	Specifies the address to start reading from
@@ -130,23 +175,7 @@ namespace AT86RF215 {
         uint8_t* spi_block_read_8(uint16_t address, uint8_t n, uint8_t* response,
                                   Error& err);
 
-        /* Writes a word to a specified address
-         *
-         * @param address	Specifies the address to write to
-         * @param value		The value to write to the specified address
-         * @param err		Pointer to raised error
-         */
-
-        /* Writes a word to a specified address
-         *
-         * @param address	Specifies the address to start writing to
-         * @param n			Number of bytes to write
-         * @param value		Pointer to array of values to write to address
-         * @param err		Pointer to raised error
-         */
-        void spi_write_16(uint16_t address, uint16_t value, Error& err);
-
-        /*
+        /**
          * Fetches the current state of the transceiver
          *
          * @param transceiver	Specifies the transceiver used
@@ -154,7 +183,7 @@ namespace AT86RF215 {
          */
         State get_state(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Sets the state of the transceiver
          *
          * @param transceiver	Specifies the transceiver used
@@ -163,14 +192,14 @@ namespace AT86RF215 {
          */
         void set_state(Transceiver transceiver, State state_cmd, Error& err);
 
-        /*
+        /**
          * Does chip reset and reads from the interrupt status registers via SPI, resetting them.
          * It also restores the config settings
          * @param error		Pointer to raised error
          */
         void chip_reset(Error& error);
 
-        /*
+        /**
          * Sets PLL channel spacing (25kHz resolution)
          *
          * @param transceiver	Specifies the transceiver used
@@ -180,14 +209,14 @@ namespace AT86RF215 {
         void set_pll_channel_spacing(Transceiver transceiver, uint8_t spacing,
                                      Error& err);
 
-        /*
+        /**
          * Gets PLL channel spacing
          * @param transceiver	Specifies the transceiver used
          * @param err		Pointer to raised error
          */
         uint8_t get_pll_channel_spacing(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Sets the central channel frequency of the PLL
          *
          * @param transceiver	Specifier the transceiver used
@@ -197,7 +226,7 @@ namespace AT86RF215 {
         void set_pll_channel_frequency(Transceiver transceiver, uint16_t freq,
                                        Error& err);
 
-        /*
+        /**
          * Fetches the central channel frequency of the PLL
          *
          * @param transceiver	Specifier the transceiver used
@@ -205,7 +234,7 @@ namespace AT86RF215 {
          */
         uint16_t get_pll_channel_frequency(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Gets the channel number of the PLL
          *
          * @param transceiver	Specifier the transceiver used
@@ -213,7 +242,7 @@ namespace AT86RF215 {
          */
         uint16_t get_pll_channel_number(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Sets the loop bandwitdh of the PLL. Options are:
          * 	- Default (0x0)
          * 	- 15% smaller than default (0x1)
@@ -225,7 +254,7 @@ namespace AT86RF215 {
          */
         void set_pll_bw(PLLBandwidth bw, Error& err);
 
-        /*
+        /**
          * Gets the loop bandwitdh of the PLL. Options are:
          * 	- Default
          * 	- 15% smaller than default
@@ -237,7 +266,7 @@ namespace AT86RF215 {
          */
         PLLBandwidth get_pll_bw(Error& err);
 
-        /*
+        /**
          * Gets the state of the PLL (locked/not locked)
          *
          * @param transceiver		Specify the transceiver used
@@ -245,7 +274,7 @@ namespace AT86RF215 {
          */
         PLLState get_pll_state(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Configures the PLL
          *
          * @param transceiver		         Specify the transceiver used
@@ -254,7 +283,7 @@ namespace AT86RF215 {
          */
         void configure_pll(Transceiver transceiver, FrequencySynthesizer& frequencySynthesizerConfig, Error& err);
 
-        /*
+        /**
          * Gets the part number of the device
          *
          * @param err	Pointer to raised error
@@ -265,14 +294,14 @@ namespace AT86RF215 {
          */
         DevicePartNumber get_part_number(Error& err);
 
-        /*
+        /**
          * Gets the version number of the device
          *
          * @param err	Pointer to raised error
          */
         DeviceVersionNumber get_version_number(Error& err);
 
-        /*
+        /**
          * Sets the PLL frequency
          *
          * @param transceiver	Specify the transceiver used
@@ -281,7 +310,7 @@ namespace AT86RF215 {
          */
         void set_pll_frequency(Transceiver transceiver, uint8_t freq, Error& err);
 
-        /*
+        /**
          * Gets the PLL frequency
          *
          * @param transceiver	Specify the transceiver used
@@ -290,7 +319,7 @@ namespace AT86RF215 {
          */
         uint8_t get_pll_frequency(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Sets trimming capacitor to match the load of external TCXO (if used), with
          * a precision of 0.3 pF.
          *
@@ -307,7 +336,7 @@ namespace AT86RF215 {
          */
         void set_tcxo_trimming(CrystalTrim trim, Error& err);
 
-        /*
+        /**
          * Reads trimming capacitor to match the load of external TXCO (if used), with
          * a precision of 0.3 pF.
          *
@@ -315,30 +344,29 @@ namespace AT86RF215 {
          */
         CrystalTrim read_tcxo_trimming(Error& err);
 
-        /*
+        /**
          * Set fast start-up enable option for external crystal oscillator
          * If enabled, it will increase start-up time by 0.8mA while also increasing
          * the start-up time.
          *
-         * @oaram fast_start_up		Fast start-up option for TCXO
-         * @param er				Pointer to raised error
+         * @param fast_start_up		Fast start-up option for TCXO
+         * @param err				Pointer to raised error
          */
         void set_tcxo_fast_start_up_enable(bool fast_start_up, Error& err);
 
-        /*
+        /**
          * Reads fast start-up enable option for external crystal oscillator
          * If enabled, it will increase start-up time by 0.8mA while also increasing
          * the start-up time.
          *
-         * @oaram fast_start_up		Fast start-up option for TCXO
          * @param err				Pointer to raised error
          */
         bool read_tcxo_fast_start_up_enable(Error& err);
 
-        /*
+        /**
          * Set PA ramp-up time in TX chain.
          *
-         * Longer ramp-up time requires more power but decreases possible spurious emmissions
+         * Longer ramp-up time requires more power but decreases possible spurious emissions
          *
          * @param transceiver		Specifies the transceiver used
          * @param err				Pointer to raised error
@@ -346,7 +374,7 @@ namespace AT86RF215 {
          */
         PowerAmplifierRampTime get_pa_ramp_up_time(Transceiver transceiver,
                                                    Error& err);
-        /*
+        /**
          * Get the low pass cut-off frequency of the filter in the TX chain.
          * For the filter response refer to Figure 6-2, Atmel AT86RF215 datasheet
          *
@@ -357,8 +385,8 @@ namespace AT86RF215 {
         TransmitterCutOffFrequency get_cutoff_freq(Transceiver transceiver,
                                                    Error& err);
 
-        /*
-         * Get the relative cut-off frequency of the filter in the TX chain.	 *
+        /**
+         * Get the relative cut-off frequency of the filter in the TX chain.
          *
          * @param transceiver		Specifies the transceiver used
          * @param err				Pointer to raised error
@@ -366,7 +394,7 @@ namespace AT86RF215 {
          */
         TxRelativeCutoffFrequency get_relative_cutoff_freq(Transceiver transceiver,
                                                            Error& err);
-        /*
+        /**
          * Get whether direct modulation is used in the TX chain.
          * Only available for baseband FSK and OQPSK)
          *
@@ -376,7 +404,7 @@ namespace AT86RF215 {
          */
         bool get_direct_modulation(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Set the sample rate of the receiver.
          * For exact configuration of the sample_rate refer to AT86RF215 datasheet, Table 6-6
          * or in registers.h*
@@ -387,7 +415,7 @@ namespace AT86RF215 {
          */
         ReceiverSampleRate get_sample_rate(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Read PA DC current
          *
          * @param transceiver		Specifies the transceiver used
@@ -397,16 +425,16 @@ namespace AT86RF215 {
         PowerAmplifierCurrentControl get_pa_dc_current(Transceiver transceiver,
                                                        Error& err);
 
-        /*
+        /**
          * Get whether the external LNA is bypassed
          *
          * @param transceiver		Specifies the transceiver used
          * @param err				Pointer to raised error
-         * @retuen					Get whether external LNA is bypassed
+         * @return					Get whether external LNA is bypassed
          */
         bool get_lna_bypassed(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Shows whether Automatic Gain Control is used for the external LNA.
          *
          * @param transceiver		Specifies the transceiver used
@@ -415,19 +443,18 @@ namespace AT86RF215 {
          */
         AutomaticGainControlMAP get_agcmap(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Set whether an external analog voltage is supplied to AVDD0 or AVDD1 for the sub-1 GHz
          * and the 2.4 Ghz transceiver respectively
          *
          * @param transceiver		Specifies the transceiver used
-         * @oaram avext				Specifies whether external voltage is supplied to AVDD
          * @param err				Pointer to raised error
          * @return					Specifies whether external voltage is supplied to AVDD
          */
         AutomaticVoltageExternal get_external_analog_voltage(
                 Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Shows whether analog voltage is settled
          *
          * @param transceiver		Specifies the transceiver used
@@ -436,7 +463,7 @@ namespace AT86RF215 {
          */
         bool get_analog_voltage_settled_status(Transceiver transceiver, Error& err);
 
-        /*
+        /**
          * Fetches supplied voltage of the internal PA
          *
          * @param transceiver		Specifies the transceiver used
@@ -446,36 +473,7 @@ namespace AT86RF215 {
         PowerAmplifierVoltageControl get_analog_power_amplifier_voltage(
                 Transceiver transceiver, Error& err);
 
-        /*
-         * Shows the preamble detection sensitivity threshold for MR-O-QPSK.
-         *
-         * @param transceiver		Specifies the transceiver used
-         * @param err				Pointer to raised error
-         * @return					Legacy O-QPSK preamble detections threshold (PDT0 value)
-         */
-        uint8_t get_preamble_detection_threshold_0(Transceiver transceiver,
-                                                   Error& err);
-        /*
-         *  This sub-register configures the search space of SFD words for MR-O-QPSK.
-         *
-         * @param transceiver		Specifies the transceiver used
-         * @param sfdss				Configures where the search of SFD words will be
-         * @param err				Pointer to raised error
-
-         */
-        void set_sfd_search_space(Transceiver transceiver, SFDSearchSpace sfd,
-                                  Error& err);
-
-        /*
-         * Shows which will be the search space of SFD words for MR-O-QPSK
-         *
-         * @param transceiver		Specifies the transceiver used
-         * @param err				Pointer to raised error
-         * @return					The search space of SFD words for MR-O-QPSK (NSFD sub-register value)
-         */
-        SFDSearchSpace get_sfd_search_space(Transceiver transceiver, Error& err);
-
-        /*
+        /**
          * Set receiver energy detection average duration given by df*dtb
          *
          * @param transceiver		Specifies the transceiver used
@@ -486,7 +484,7 @@ namespace AT86RF215 {
         void set_ed_average_detection(Transceiver transceiver, uint8_t df,
                                       EnergyDetectionTimeBasis dtb, Error& err);
 
-        /*
+        /**
          * Read receiver energy detection average duration given by df*dtb in μs
          *
          * @param transceiver		Specifies the transceiver used
@@ -497,14 +495,15 @@ namespace AT86RF215 {
         int8_t get_receiver_energy_detection(Transceiver transceiver, Error& err);
 
 
-        /* Set transceiver battery monitor status
+        /**
+         * Set transceiver battery monitor status
          *
          * @param status			Battery monitor status
          * @param err				Pointer to raised error
          */
         void set_battery_monitor_status(bool status, Error& err);
 
-        /*
+        /**
          * Get transceiver battery monitor status
          *
          * @param err				Pointer to raised error
@@ -512,7 +511,7 @@ namespace AT86RF215 {
          */
         BatteryMonitorStatus get_battery_monitor_status(Error& err);
 
-        /*
+        /**
          * Set the threshold of the battery monitoring range (low/high)
          *
          * @param range				Transceiver battery range
@@ -521,7 +520,7 @@ namespace AT86RF215 {
         void set_battery_monitor_high_range(BatteryMonitorHighRange range,
                                             Error& err);
 
-        /*
+        /**
          * Gets the threshold of the battery monitoring range (low/high)
          *
          * @param err				Pointer to raised error
@@ -529,7 +528,7 @@ namespace AT86RF215 {
          */
         uint8_t get_battery_monitor_high_range(Error& err);
 
-        /*
+        /**
          * Sets voltage threshold for battery monitoring
          *
          * @param threshold			Battery voltage threshold
@@ -538,7 +537,8 @@ namespace AT86RF215 {
         void set_battery_monitor_voltage_threshold(BatteryMonitorVoltageThreshold threshold,
                                                    Error& err);
         void set_battery_monitor_control(BatteryMonitorHighRange range, BatteryMonitorVoltageThreshold threshold, Error& err);
-        /*
+
+        /**
          * Get voltage threshold for battery monitoring
          *
          * @param err				Pointer to raised error
@@ -546,11 +546,11 @@ namespace AT86RF215 {
          */
         uint8_t get_battery_monitor_voltage_threshold(Error& err);
 
-        /*
+        /**
          * Sets up the target registers for setting up the transceiver tx frontend
          *
          * @param transceiver		Specifies the transceiver used
-         * @param paramp			TX PA ramp time
+         * @param pa_ramp_time	    TX PA ramp time
          * @param cutoff 			TX filter cut-off frequency
          * @param tx_rel_cutoff     TX relative cut-off frequency
          * @param direct_mod		Specifies whether direct modulation is supported (supported for FSK and OQPSK)
@@ -560,7 +560,7 @@ namespace AT86RF215 {
          * @param tx_out_power		Output power of the transmitter (0x00-0x1F in 1dB steps)
          * @param ext_lna_bypass 	Specifies whether external LNA will be bypassed
          * @param agc_map			Controls gain of the gain controler for the external LNA
-         * @param av_ext			Disables internal supply voltage
+         * @param avg_ext			Disables internal supply voltage
          * @param av_enable			Defines whether voltage regulator is enabled during TRXOFF
          * @param pa_vcontrol		Controls supply voltage of internal PA
          * @param err				Pointer to raised error
@@ -575,20 +575,20 @@ namespace AT86RF215 {
                                AutomaticVoltageExternal avg_ext, AnalogVoltageEnable av_enable,
                                PowerAmplifierVoltageControl pa_vcontrol, ExternalFrontEndControl externalFrontEndControl, Error& err);
 
-        /*
+        /**
          * Sets up the target registers for setting up the transceiver rx frontend
          *
          * @param transceiver		Specifies the transceiver used
          * @param if_inversion		Defines whether IF inverted signal is used in the receive side
-         * @param if_sheft			If true, it shifts the IF frequency by a factor of 1.25
+         * @param if_shift			If true, it shifts the IF frequency by a factor of 1.25
          * @param rx_bw				Specifies the receiver bandwidth
          * @param rx_rel_cutoff		RX filter relative cut-off frequency
          * @param rx_sample_rate	RX sample rate
          * @param agc_input			If true, the filtered front signal is used rather than the signal before the channel filter
          * @param agc_avg_sample	AGC averaging
-         * @param agc_enabled 		If set to true AGC is enabled, otherwise, the gain is defined by the agc_gain parameter (AGCS.GCW register)
+         * @param agc_enable 		If set to true AGC is enabled, otherwise, the gain is defined by the agc_gain parameter (AGCS.GCW register)
          * @param agc_target		Sets the target output gain of the AGC
-         * @param agc_gcw			If AGC is not enabled, then this register is used to define the maximum gain (valid values 0-23 with 3dB steps)
+         * @param gain_control_word	If AGC is not enabled, then this register is used to define the maximum gain (valid values 0-23 with 3dB steps)
          * @param err				Pointer to raised error
          */
         void setup_rx_frontend(Transceiver transceiver, bool if_inversion,
@@ -597,13 +597,13 @@ namespace AT86RF215 {
                                ReceiverSampleRate rx_sample_rate, bool agc_input,
                                AverageTimeNumberSamples agc_avg_sample, AGCReset agc_reset, AGCFreezeControl agc_freeze_control, AGCEnable agc_enable,
                                AutomaticGainTarget agc_target, uint8_t gain_control_word, Error& err);
-        /*
+        /**
          * Set up IQ interface
          *
-         * @param ext_loopback		Defines whether external loopback is enabled (for testing purposes only)
+         * @param external_loop		Defines whether external loopback is enabled (for testing purposes only)
          * @param out_cur			Defines output current
          * @param common_mode_vol	Voltage of I/Q signals
-         * @param common_mode_ieee	Whether voltage of I/Q signals is set to 1V2 (IEEE Std 1596-compliant)
+         * @param common_mode_iee	Whether voltage of I/Q signals is set to 1V2 (IEEE Std 1596-compliant)
          * @param embedded_tx_start	Specifies whether a control bit is automatically transmitted upon start and finish of IQ stream
          * @param chip_mode			Defines what operates out of the baseband core and I/Q IF
          * @param skew_alignment	Specifies the alignment of I/Q data relative to the clock edges of RXCLK
@@ -656,7 +656,7 @@ namespace AT86RF215 {
          * Sets up physical baseband
          *
          * @param transceiver			Specifies the transceiver used
-         * @param continousTransmit 	Transmission continues for as long as PC.CTX is set
+         * @param continuousTransmit 	Transmission continues for as long as PC.CTX is set
          * @param frameSeqFilter		Successful frame reception IRQ is only triggered if the frame's FCS is valid
          * @param transmitterAutoFCS	Define whether the FCS is inserted automatically to the PSU
          * @param fcsType				16- or 32-bit FCS
@@ -673,7 +673,7 @@ namespace AT86RF215 {
                             bool transmitterFrameEnd, bool receiverExtendedMatch, bool receiverAddressMatch,
                             bool receiverFrameEnd, bool receiverFrameStart, Error& err);
 
-        /*
+        /**
          * Sets up the target registers based on the default configuration. It accesses *all* writable registers and
          * therefore, it requires the transceiver to be in the `TXPREP` state.
          *
@@ -681,7 +681,7 @@ namespace AT86RF215 {
          */
         void setup(Error& err);
 
-        /*
+        /**
          *
          * Returns the IRQ register from the corresponding transceiver
          *
@@ -689,6 +689,8 @@ namespace AT86RF215 {
          * @param err				Pointer to raised error
          */
         uint8_t get_irq(Transceiver transceiver, Error& err);
+
+        etl::expected<void, Error> check_transceiver_connection(Error& err);
 
         void set_bbc_fskc0_config(Transceiver transceiver,
                                   Bandwidth_time_product bt, Mod_index_scale midxs, Mod_index midx, FSK_mod_order mord,
@@ -724,7 +726,10 @@ namespace AT86RF215 {
         void set_external_front_end_control(Transceiver transceiver,
                                             ExternalFrontEndControl frontEndControl,
                                             Error& err);
-        /*
+
+        void print_state(Transceiver transceiver, Error& err);
+        void print_error(Error& err);
+        /**
          * This function is called automatically whenever an interrupt is raised. It reads the interrupt status registers
          * and takes action depending on the raised interrupt status.
          */
@@ -757,7 +762,7 @@ namespace AT86RF215 {
          * @param transceiver		Specifies the transceiver used
          * @param err				Pointer to raised error
          */
-        void beginBasebandPacketReception(Transceiver transceiver, Error &err);
+        void prepareForPacketReceptionBaseband(Transceiver transceiver, Error &err);
 
         etl::expected<uint16_t, Error> get_received_length(Transceiver transceiver, Error& err);
 
@@ -769,33 +774,12 @@ namespace AT86RF215 {
          */
         void packetReceptionBaseband(Transceiver transceiver, Error& err);
 
-        uint8_t received_packet[2047]; // buffer for storing received packet in baseband core operation
-        uint16_t received_packet_length = 0;
-        int8_t energy_measurement = 0;
-
-        // flags for interrupts //
-
-        // radio interrupts //
-        bool IFSynchronization_flag = false;
-        bool TransceiverError_flag = false;
-        bool EnergyDetectionCompletion_flag = false;
-        bool TransceiverReady_flag  = false;
-        bool Wakeup_flag = false;
-        bool BatteryLow_flag = false;
-
-        // baseband core interrupts //
-        bool FrameBufferLevelIndication_flag = false;
-        bool AGCRelease_flag = false;
-        bool AGCHold_flag = false;
-        bool TransmitterFrameEnd_flag = false;
-        bool ReceiverExtendMatch_flag = false;
-        bool ReceiverAddressMatch_flag = false;
-        bool ReceiverFrameEnd_flag = false;
-        bool ReceiverFrameStart_flag = false;
-
+    private:
+        /// Storage for mutex
+        StaticSemaphore_t mtx_buf = {};
+        /// SPI handle
+        SPI_HandleTypeDef* hspi;
     };
 
     extern At86rf215 transceiver;
-
-
 } // namespace AT86RF215

@@ -1,7 +1,6 @@
 #pragma once
-#include "at86rf215definitions.hpp"
 #include <cstdint>
-#include <etl/array.h>
+#include "at86rf215definitions.hpp"
 
 namespace AT86RF215 {
 
@@ -431,6 +430,7 @@ namespace AT86RF215 {
     };
 
     struct FrequencySynthesizer {
+        /// This is a flag for setup(), so an error may be thrown in case the config was not initialized properly
         bool validConfig09, validConfig24;
 
         /// Cached frequency for easy access
@@ -449,8 +449,7 @@ namespace AT86RF215 {
         }
 
         // Frequency must be given in kHz. If the given frequency and channel mode are incompatible
-        // with the given tranceiver, a flag will be set to false, so an error can be returned during
-        // register configuration.
+        // with the given tranceiver, the validConfig flag will be set to false.
         void setup_FrequencySynthesizer(Transceiver transceiver, uint32_t frequency, PLLChannelMode channelMode, PLLBandwidth bw) {
 
             transceiver == RF09 ? (validConfig09 = false) : (validConfig24 = false);
