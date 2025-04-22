@@ -1750,5 +1750,5 @@ namespace AT86RF215 {
         }
     }
 
-    auto tranceiverUtils = At86rf215_Utilities();
+    At86rf215_Utilities transceiverUtils = At86rf215_Utilities();
 } // namespace AT86RF215
