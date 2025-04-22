@@ -1,0 +1,3 @@
+// MEMORY_QUEUE(name, sizeOfItem, numberOfItems)
+MEMORY_QUEUE(testData, 520, 10)
+// Add more queues here...
