@@ -1241,7 +1241,7 @@ namespace AT86RF215 {
     }
 
     etl::expected<void, Error> At86rf215_Utilities::check_transceiver_connection(Error& err) {
-        DevicePartNumber dpn = transceiver.get_part_number(err);
+        const DevicePartNumber dpn = get_part_number(err);
         if (err == Error::NO_ERRORS && dpn == DevicePartNumber::AT86RF215) {
             return {}; /// success
         } else {
@@ -1750,5 +1750,5 @@ namespace AT86RF215 {
         }
     }
 
-    auto tranceiverUtils = At86rf215_Utilities();
+    At86rf215_Utilities transceiverUtils = At86rf215_Utilities();
 } // namespace AT86RF215
