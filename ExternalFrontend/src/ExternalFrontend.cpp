@@ -147,4 +147,6 @@ namespace ExternalFrontend {
         HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_RESET);
         return true;
     }
+
+    ExternalFrontendUtilities externalFrontendUtils = ExternalFrontendUtilities();
 } // namespace ExternalFrontend
