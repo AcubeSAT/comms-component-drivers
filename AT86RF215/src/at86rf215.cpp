@@ -3,7 +3,7 @@
 
 namespace AT86RF215 {
 
-    void At86rf215::spi_write_8(uint16_t address, uint8_t value, Error& err) {
+    void At86rf215_Utilities::spi_write_8(uint16_t address, uint8_t value, Error& err) {
         uint8_t msg[3] = {static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF), value};
 
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
@@ -18,7 +18,7 @@ namespace AT86RF215 {
         err = Error::NO_ERRORS;
     }
 
-    uint8_t At86rf215::spi_read_8(uint16_t address, Error& err) {
+    uint8_t At86rf215_Utilities::spi_read_8(uint16_t address, Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>((address >> 8) & 0x7F), static_cast<uint8_t>(address & 0xFF)};
         uint8_t response[3];
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
@@ -36,7 +36,7 @@ namespace AT86RF215 {
         return response[2];
     }
 
-    void At86rf215::spi_block_write_8(uint16_t address, uint16_t n, uint8_t* value,
+    void At86rf215_Utilities::spi_block_write_8(uint16_t address, uint16_t n, uint8_t* value,
                                       Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF)};
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
@@ -52,7 +52,7 @@ namespace AT86RF215 {
         err = Error::NO_ERRORS;
     }
 
-    uint8_t* At86rf215::spi_block_read_8(uint16_t address, uint8_t n,
+    uint8_t* At86rf215_Utilities::spi_block_read_8(uint16_t address, uint8_t n,
                                          uint8_t* response, Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>((address >> 8) & 0x7F), static_cast<uint8_t>(address & 0xFF)};
 
@@ -71,7 +71,7 @@ namespace AT86RF215 {
     }
 
 
-    State At86rf215::get_state(Transceiver transceiver, Error& err) {
+    State At86rf215_Utilities::get_state(Transceiver transceiver, Error& err) {
         uint8_t state;
         if (transceiver == RF09) {
             state = spi_read_8(RF09_STATE, err) & 0x07;
@@ -92,7 +92,7 @@ namespace AT86RF215 {
         }
     }
 
-    void At86rf215::set_state(Transceiver transceiver, State state_cmd,
+    void At86rf215_Utilities::set_state(Transceiver transceiver, State state_cmd,
                               Error& err) {
         State state = get_state(transceiver, err);
         if (err != Error::NO_ERRORS) {
@@ -139,7 +139,7 @@ namespace AT86RF215 {
         }
     }
 
-    void At86rf215::chip_reset(Error& error) {
+    void At86rf215_Utilities::chip_reset(Error& error) {
         // Chip reset
         spi_write_8(RegisterAddress::RF_RST, 0x07, error);
 
@@ -153,7 +153,7 @@ namespace AT86RF215 {
         setup(error);
     }
 
-    void At86rf215::set_pll_channel_spacing(Transceiver transceiver,
+    void At86rf215_Utilities::set_pll_channel_spacing(Transceiver transceiver,
                                             uint8_t spacing, Error& err) {
         RegisterAddress regscs;
 
@@ -165,7 +165,7 @@ namespace AT86RF215 {
         spi_write_8(regscs, spacing, err);
     }
 
-    uint8_t At86rf215::get_pll_channel_spacing(Transceiver transceiver,
+    uint8_t At86rf215_Utilities::get_pll_channel_spacing(Transceiver transceiver,
                                                Error& err) {
         RegisterAddress regscs;
 
@@ -177,7 +177,7 @@ namespace AT86RF215 {
         return spi_read_8(regscs, err);
     }
 
-    void At86rf215::set_pll_channel_frequency(Transceiver transceiver,
+    void At86rf215_Utilities::set_pll_channel_frequency(Transceiver transceiver,
                                               uint16_t freq, Error& err) {
         RegisterAddress regcf0h;
         RegisterAddress regcf0l;
@@ -197,7 +197,7 @@ namespace AT86RF215 {
         spi_write_8(regcf0h, (freq & 0xFF00) >> 8, err);
     }
 
-    uint16_t At86rf215::get_pll_channel_frequency(Transceiver transceiver,
+    uint16_t At86rf215_Utilities::get_pll_channel_frequency(Transceiver transceiver,
                                                   Error& err) {
         RegisterAddress regcf0h;
         RegisterAddress regcf0l;
@@ -219,7 +219,7 @@ namespace AT86RF215 {
         return (cf0h << 8) | cf0l;
     }
 
-    uint16_t At86rf215::get_pll_channel_number(Transceiver transceiver,
+    uint16_t At86rf215_Utilities::get_pll_channel_number(Transceiver transceiver,
                                                Error& err) {
         RegisterAddress regcnh;
         RegisterAddress regcnl;
@@ -241,7 +241,7 @@ namespace AT86RF215 {
         return (cnh << 8) | cnl;
     }
 
-    void At86rf215::set_pll_bw(PLLBandwidth bw, Error& err) {
+    void At86rf215_Utilities::set_pll_bw(PLLBandwidth bw, Error& err) {
         uint8_t reg_pll = spi_read_8(RF09_PLL, err);
         if (err != Error::NO_ERRORS) {
             return;
@@ -256,7 +256,7 @@ namespace AT86RF215 {
         }
     }
 
-    PLLBandwidth At86rf215::get_pll_bw(Error& err) {
+    PLLBandwidth At86rf215_Utilities::get_pll_bw(Error& err) {
         uint8_t bw = (spi_read_8(RF09_PLL, err) >> 4) & 0x03;
         if (err != Error::NO_ERRORS) {
             return PLLBandwidth::BWInvalid;
@@ -264,7 +264,7 @@ namespace AT86RF215 {
         return static_cast<PLLBandwidth>(bw);
     }
 
-    PLLState At86rf215::get_pll_state(Transceiver transceiver, Error& err) {
+    PLLState At86rf215_Utilities::get_pll_state(Transceiver transceiver, Error& err) {
         RegisterAddress regpll;
 
         if (transceiver == RF09) {
@@ -277,7 +277,7 @@ namespace AT86RF215 {
         return static_cast<PLLState>(state);
     }
 
-    void At86rf215::configure_pll(Transceiver transceiver, FrequencySynthesizer& frequencySynthesizerConfig, Error& err) {
+    void At86rf215_Utilities::configure_pll(Transceiver transceiver, FrequencySynthesizerConfig& frequencySynthesizerConfig, Error& err) {
 
         if (get_state(transceiver, err) != State::RF_TRXOFF) {
             err = Error::INVALID_STATE_FOR_OPERATION;
@@ -351,7 +351,7 @@ namespace AT86RF215 {
         set_pll_bw(bw, err);
     }
 
-    DevicePartNumber At86rf215::get_part_number(Error& err) {
+    DevicePartNumber At86rf215_Utilities::get_part_number(Error& err) {
         uint8_t dpn = spi_read_8(RegisterAddress::RF_PN, err);
         if (err != Error::NO_ERRORS) {
             return DevicePartNumber::AT86RF215_INVALID;
@@ -364,7 +364,7 @@ namespace AT86RF215 {
         }
     }
 
-    DeviceVersionNumber At86rf215::get_version_number(Error& err) {
+    DeviceVersionNumber At86rf215_Utilities::get_version_number(Error& err) {
         uint8_t vn = spi_read_8(RegisterAddress::RF_VN, err);
         if (err != Error::NO_ERRORS) {
             return DeviceVersionNumber::INVALID_VERSION_NUMBER;
@@ -372,7 +372,7 @@ namespace AT86RF215 {
         return static_cast<DeviceVersionNumber>(vn);
     }
 
-    uint8_t At86rf215::get_pll_frequency(Transceiver transceiver, Error& err) {
+    uint8_t At86rf215_Utilities::get_pll_frequency(Transceiver transceiver, Error& err) {
         RegisterAddress regpll;
 
         if (transceiver == RF09) {
@@ -388,7 +388,7 @@ namespace AT86RF215 {
         return freq;
     }
 
-    void At86rf215::set_tcxo_trimming(CrystalTrim trim, Error& err) {
+    void At86rf215_Utilities::set_tcxo_trimming(CrystalTrim trim, Error& err) {
         uint8_t trgxcov = spi_read_8(RF_XOC, err) & 0x1F;
         if (err != Error::NO_ERRORS)
             return;
@@ -396,7 +396,7 @@ namespace AT86RF215 {
                     err);
     }
 
-    CrystalTrim At86rf215::read_tcxo_trimming(Error& err) {
+    CrystalTrim At86rf215_Utilities::read_tcxo_trimming(Error& err) {
         auto crystalTrim =
                 static_cast<CrystalTrim>(spi_read_8(RF_XOC, err) & 0x0F);
         if (err != Error::NO_ERRORS) {
@@ -405,20 +405,20 @@ namespace AT86RF215 {
         return crystalTrim;
     }
 
-    void At86rf215::set_tcxo_fast_start_up_enable(bool fast_start_up, Error& err) {
+    void At86rf215_Utilities::set_tcxo_fast_start_up_enable(bool fast_start_up, Error& err) {
         uint8_t trgxcov = spi_read_8(RF_XOC, err) & 0x1F;
         if (err != Error::NO_ERRORS)
             return;
         spi_write_8(RF_XOC, (trgxcov & 0x0F) | (fast_start_up << 4), err);
     }
 
-    bool At86rf215::read_tcxo_fast_start_up_enable(Error& err) {
+    bool At86rf215_Utilities::read_tcxo_fast_start_up_enable(Error& err) {
         bool fast_start_up =
                 static_cast<bool>((spi_read_8(RF_XOC, err) & 0x10) >> 4);
         return fast_start_up;
     }
 
-    PowerAmplifierRampTime At86rf215::get_pa_ramp_up_time(Transceiver transceiver,
+    PowerAmplifierRampTime At86rf215_Utilities::get_pa_ramp_up_time(Transceiver transceiver,
                                                           Error& err) {
         RegisterAddress regtxcutc;
 
@@ -432,7 +432,7 @@ namespace AT86RF215 {
         return static_cast<PowerAmplifierRampTime>(ramp);
     }
 
-    TransmitterCutOffFrequency At86rf215::get_cutoff_freq(Transceiver transceiver,
+    TransmitterCutOffFrequency At86rf215_Utilities::get_cutoff_freq(Transceiver transceiver,
                                                           Error& err) {
         RegisterAddress regtxcutc;
 
@@ -447,7 +447,7 @@ namespace AT86RF215 {
     }
 
 
-    TxRelativeCutoffFrequency At86rf215::get_relative_cutoff_freq(
+    TxRelativeCutoffFrequency At86rf215_Utilities::get_relative_cutoff_freq(
             Transceiver transceiver, Error& err) {
         RegisterAddress regtxdfe;
 
@@ -462,7 +462,7 @@ namespace AT86RF215 {
     }
 
 
-    bool At86rf215::get_direct_modulation(Transceiver transceiver, Error& err) {
+    bool At86rf215_Utilities::get_direct_modulation(Transceiver transceiver, Error& err) {
         RegisterAddress regtxdfe;
 
         if (transceiver == RF09) {
@@ -475,7 +475,7 @@ namespace AT86RF215 {
     }
 
 
-    ReceiverSampleRate At86rf215::get_sample_rate(Transceiver transceiver,
+    ReceiverSampleRate At86rf215_Utilities::get_sample_rate(Transceiver transceiver,
                                                   Error& err) {
         RegisterAddress regtxdfe;
 
@@ -488,7 +488,7 @@ namespace AT86RF215 {
         return static_cast<ReceiverSampleRate>(spi_read_8(regtxdfe, err) & 0x0F);
     }
 
-    PowerAmplifierCurrentControl At86rf215::get_pa_dc_current(
+    PowerAmplifierCurrentControl At86rf215_Utilities::get_pa_dc_current(
             Transceiver transceiver, Error& err) {
         RegisterAddress regpac;
 
@@ -503,7 +503,7 @@ namespace AT86RF215 {
     }
 
 
-    bool At86rf215::get_lna_bypassed(Transceiver transceiver, Error& err) {
+    bool At86rf215_Utilities::get_lna_bypassed(Transceiver transceiver, Error& err) {
         RegisterAddress regaux =
                 (transceiver == RF09) ? RegisterAddress::RF09_AUXS : RegisterAddress::RF24_AUXS;
         uint8_t lna_bypass = spi_read_8(regaux, err) & 0x80;
@@ -512,7 +512,7 @@ namespace AT86RF215 {
         return lna_bypass >> 7;
     }
 
-    AutomaticGainControlMAP At86rf215::get_agcmap(Transceiver transceiver,
+    AutomaticGainControlMAP At86rf215_Utilities::get_agcmap(Transceiver transceiver,
                                                   Error& err) {
         RegisterAddress regaux =
                 (transceiver == RF09) ? RegisterAddress::RF09_AUXS : RegisterAddress::RF24_AUXS;
@@ -523,7 +523,7 @@ namespace AT86RF215 {
     }
 
 
-    AutomaticVoltageExternal At86rf215::get_external_analog_voltage(
+    AutomaticVoltageExternal At86rf215_Utilities::get_external_analog_voltage(
             Transceiver transceiver, Error& err) {
         RegisterAddress regaux =
                 (transceiver == RF09) ? RegisterAddress::RF09_AUXS : RegisterAddress::RF24_AUXS;
@@ -533,7 +533,7 @@ namespace AT86RF215 {
         return static_cast<AutomaticVoltageExternal>(agcmap >> 4);
     }
 
-    bool At86rf215::get_analog_voltage_settled_status(Transceiver transceiver,
+    bool At86rf215_Utilities::get_analog_voltage_settled_status(Transceiver transceiver,
                                                       Error& err) {
         RegisterAddress regaux =
                 (transceiver == RF09) ? RegisterAddress::RF09_AUXS : RegisterAddress::RF24_AUXS;
@@ -542,7 +542,7 @@ namespace AT86RF215 {
             return 0;
         return avs >> 2;
     }
-    PowerAmplifierVoltageControl At86rf215::get_analog_power_amplifier_voltage(
+    PowerAmplifierVoltageControl At86rf215_Utilities::get_analog_power_amplifier_voltage(
             Transceiver transceiver, Error& err) {
         RegisterAddress regaux =
                 (transceiver == RF09) ? RegisterAddress::RF09_AUXS : RegisterAddress::RF24_AUXS;
@@ -553,7 +553,7 @@ namespace AT86RF215 {
     }
 
 
-    void At86rf215::set_ed_average_detection(Transceiver transceiver, uint8_t df,
+    void At86rf215_Utilities::set_ed_average_detection(Transceiver transceiver, uint8_t df,
                                              EnergyDetectionTimeBasis dtb, Error& err) {
         RegisterAddress regedd;
 
@@ -567,7 +567,7 @@ namespace AT86RF215 {
         spi_write_8(regedd, reg, err);
     }
 
-    uint8_t At86rf215::get_ed_average_detection(Transceiver transceiver,
+    uint8_t At86rf215_Utilities::get_ed_average_detection(Transceiver transceiver,
                                                 Error& err) {
         RegisterAddress regedd;
 
@@ -583,7 +583,7 @@ namespace AT86RF215 {
         return df * dtb;
     }
 
-    int8_t At86rf215::get_receiver_energy_detection(Transceiver transceiver,
+    int8_t At86rf215_Utilities::get_receiver_energy_detection(Transceiver transceiver,
                                                     Error& err) {
         RegisterAddress regedv;
 
@@ -608,7 +608,7 @@ namespace AT86RF215 {
     // TODO: Upon reaching RX state
     // wait 8μs + RXDFE.SR + Tu
     // read rssi
-    void At86rf215::packetTransmissionBaseband(Transceiver transceiver,
+    void At86rf215_Utilities::packetTransmissionBaseband(Transceiver transceiver,
                                                uint8_t* packet, uint16_t length, Error& err) {
 
         bool& tx_ongoing = (transceiver == RF09) ? tx_ongoing_09 : tx_ongoing_24;
@@ -658,7 +658,7 @@ namespace AT86RF215 {
         set_state(transceiver, State::RF_TXPREP, err);
     }
 
-    void At86rf215::clear_channel_assessment(Transceiver transceiver, Error& err) {
+    void At86rf215_Utilities::clear_channel_assessment(Transceiver transceiver, Error& err) {
         bool& tx_ongoing = (transceiver == RF09) ? tx_ongoing_09 : tx_ongoing_24;
         bool& rx_ongoing = (transceiver == RF09) ? rx_ongoing_09 : rx_ongoing_24;
 
@@ -680,7 +680,7 @@ namespace AT86RF215 {
         set_state(transceiver, State::RF_TXPREP, err);
     }
 
-    void At86rf215::prepareForPacketReceptionBaseband(Transceiver transceiver, Error &err) {
+    void At86rf215_Utilities::prepareForPacketReceptionBaseband(Transceiver transceiver, Error &err) {
         set_state(transceiver, State::RF_TRXOFF, err);
         if (err != Error::NO_ERRORS) {
             return;
@@ -695,7 +695,7 @@ namespace AT86RF215 {
         set_state(transceiver, State::RF_TXPREP, err);
     }
 
-    void At86rf215::packetReceptionBaseband(Transceiver transceiver, Error& err) {
+    void At86rf215_Utilities::packetReceptionBaseband(Transceiver transceiver, Error& err) {
         if (err != Error::NO_ERRORS) {
             return;
         }
@@ -723,7 +723,7 @@ namespace AT86RF215 {
         spi_block_read_8(regfbrxs, received_packet_length, received_packet, err);
     }
 
-    void At86rf215::set_battery_monitor_control(BatteryMonitorHighRange range, BatteryMonitorVoltageThreshold threshold, Error& err) {
+    void At86rf215_Utilities::set_battery_monitor_control(BatteryMonitorHighRange range, BatteryMonitorVoltageThreshold threshold, Error& err) {
         if (err != Error::NO_ERRORS) {
             return;
         }
@@ -735,12 +735,12 @@ namespace AT86RF215 {
     }
 
 
-    BatteryMonitorStatus At86rf215::get_battery_monitor_status(Error& err) {
+    BatteryMonitorStatus At86rf215_Utilities::get_battery_monitor_status(Error& err) {
         uint8_t status = (spi_read_8(RF_BMDVC, err) & 0x20) >> 5;
         return static_cast<BatteryMonitorStatus>(status);
     }
 
-    void At86rf215::set_battery_monitor_high_range(BatteryMonitorHighRange range,
+    void At86rf215_Utilities::set_battery_monitor_high_range(BatteryMonitorHighRange range,
                                                    Error& err) {
         uint8_t bmhr = spi_read_8(RF_BMDVC, err) & 0x2F;
         if (err != Error::NO_ERRORS)
@@ -748,11 +748,11 @@ namespace AT86RF215 {
         spi_write_8(RF_BMDVC, (static_cast<uint8_t>(range) << 4) | bmhr, err);
     }
 
-    uint8_t At86rf215::get_battery_monitor_high_range(Error& err) {
+    uint8_t At86rf215_Utilities::get_battery_monitor_high_range(Error& err) {
         return (spi_read_8(RF_BMDVC, err) & 0x10) >> 4;
     }
 
-    void At86rf215::set_battery_monitor_voltage_threshold(
+    void At86rf215_Utilities::set_battery_monitor_voltage_threshold(
             BatteryMonitorVoltageThreshold threshold, Error& err) {
         uint8_t reg_value_bmvt = spi_read_8(RF_BMDVC, err);
         reg_value_bmvt &= ~(0xF);
@@ -761,11 +761,11 @@ namespace AT86RF215 {
         spi_write_8(RF_BMDVC, reg_value_bmvt | static_cast<uint8_t>(threshold), err);
     }
 
-    uint8_t At86rf215::get_battery_monitor_voltage_threshold(Error& err) {
+    uint8_t At86rf215_Utilities::get_battery_monitor_voltage_threshold(Error& err) {
         return spi_read_8(RF_BMDVC, err) & 0x0F;
     }
 
-    void At86rf215::set_external_front_end_control(Transceiver transceiver, ExternalFrontEndControl frontEndControl, Error& err) {
+    void At86rf215_Utilities::set_external_front_end_control(Transceiver transceiver, ExternalFrontEndControl frontEndControl, Error& err) {
         RegisterAddress reg_address;
         if (transceiver == RF09)
             reg_address = RF09_PADFE;
@@ -780,7 +780,7 @@ namespace AT86RF215 {
         spi_write_8(reg_address, reg_value, err);
     }
 
-    void At86rf215::setup_tx_frontend(Transceiver transceiver,
+    void At86rf215_Utilities::setup_tx_frontend(Transceiver transceiver,
                                       PowerAmplifierRampTime pa_ramp_time, TransmitterCutOffFrequency cutoff,
                                       TxRelativeCutoffFrequency tx_rel_cutoff, Direct_Mod_Enable_FSKDM direct_mod,
                                       TransmitterSampleRate tx_sample_rate,
@@ -836,7 +836,7 @@ namespace AT86RF215 {
         set_external_front_end_control(transceiver, externalFrontEndControl, err);
     }
 
-    void At86rf215::setup_iq(ExternalLoopback external_loop,
+    void At86rf215_Utilities::setup_iq(ExternalLoopback external_loop,
                              IQOutputCurrent out_cur, IQmodeVoltage common_mode_vol,
                              IQmodeVoltageIEE common_mode_iee, EmbeddedControlTX embedded_tx_start,
                              ChipMode chip_mode, SkewAlignment skew_alignment, Error& err) {
@@ -856,7 +856,7 @@ namespace AT86RF215 {
         }
     }
 
-    bool At86rf215::get_iqSyncStatus(Error& err) {
+    bool At86rf215_Utilities::get_iqSyncStatus(Error& err) {
         RegisterAddress reg = RegisterAddress::RF_IQIFC2;
         uint8_t val = spi_read_8(reg, err);
         if (err != Error::NO_ERRORS) {
@@ -865,7 +865,7 @@ namespace AT86RF215 {
         return val >> 7;
     }
 
-    void At86rf215::setup_crystal(bool fast_start_up, CrystalTrim crystal_trim,
+    void At86rf215_Utilities::setup_crystal(bool fast_start_up, CrystalTrim crystal_trim,
                                   Error& err) {
        set_tcxo_fast_start_up_enable(fast_start_up, err);
        if (err != Error::NO_ERRORS) {
@@ -878,7 +878,7 @@ namespace AT86RF215 {
        }
     }
 
-    void At86rf215::setup_rx_energy_detection(Transceiver transceiver,
+    void At86rf215_Utilities::setup_rx_energy_detection(Transceiver transceiver,
                                               EnergyDetectionMode energy_mode, uint8_t energy_detect_factor,
                                               EnergyDetectionTimeBasis energy_time_basis, Error& err) {
         uint8_t reg_value;
@@ -911,7 +911,7 @@ namespace AT86RF215 {
         spi_write_8(regedd, reg_value, err);
     }
 
-    void At86rf215::setup_rx_frontend(Transceiver transceiver, bool if_inversion,
+    void At86rf215_Utilities::setup_rx_frontend(Transceiver transceiver, bool if_inversion,
                                       bool if_shift, ReceiverBandwidth rx_bw,
                                       RxRelativeCutoffFrequency rx_rel_cutoff,
                                       ReceiverSampleRate rx_sample_rate, bool agc_input,
@@ -976,7 +976,7 @@ namespace AT86RF215 {
         spi_write_8(regagcs, reg, err);
     }
 
-    void At86rf215::setup_irq_cfg(bool maskMode, IRQPolarity polarity,
+    void At86rf215_Utilities::setup_irq_cfg(bool maskMode, IRQPolarity polarity,
                                   PadDriverStrength padDriverStrength, Error& err) {
         RegisterAddress regcfg = RF_CFG;
         uint8_t reg_value = spi_read_8(regcfg, err);
@@ -988,7 +988,7 @@ namespace AT86RF215 {
         spi_write_8(regcfg, reg_value, err);
     }
 
-    void At86rf215::setup_phy_baseband(Transceiver transceiver, bool continuousTransmit,
+    void At86rf215_Utilities::setup_phy_baseband(Transceiver transceiver, bool continuousTransmit,
                                        bool frameSeqFilter, bool transmitterAutoFCS,
                                        FrameCheckSequenceType fcsType, bool basebandEnable,
                                        PhysicalLayerType phyType, Error& err) {
@@ -1006,7 +1006,7 @@ namespace AT86RF215 {
     }
 
 
-    void At86rf215::setup_irq_mask(Transceiver transceiver, bool iqIfSynchronizationFailure, bool transceiverError,
+    void At86rf215_Utilities::setup_irq_mask(Transceiver transceiver, bool iqIfSynchronizationFailure, bool transceiverError,
                                    bool batteryLow, bool energyDetectionCompletion, bool transceiverReady, bool wakeup,
                                    bool frameBufferLevelIndication, bool agcRelease, bool agcHold,
                                    bool transmitterFrameEnd, bool receiverExtendedMatch, bool receiverAddressMatch,
@@ -1028,7 +1028,7 @@ namespace AT86RF215 {
                     frameBufferLevelIndication << 7 | agcRelease << 6 | agcHold << 5 | transmitterFrameEnd << 4 | receiverExtendedMatch << 3 | receiverAddressMatch << 2 | receiverFrameEnd << 1 | receiverFrameStart, err);
     }
 
-    void At86rf215::setup(Error& err) {
+    void At86rf215_Utilities::setup(Error& err) {
         // Check state of RF09 core
         State state = get_state(Transceiver::RF09, err);
         if (err != Error::NO_ERRORS) {
@@ -1231,7 +1231,7 @@ namespace AT86RF215 {
         setup_crystal(generalConfig.fastStartUp, generalConfig.crystalTrim, err);
     }
 
-    uint8_t At86rf215::get_irq(Transceiver transceiver, Error& err) {
+    uint8_t At86rf215_Utilities::get_irq(Transceiver transceiver, Error& err) {
         if (transceiver == RF09) {
             return spi_read_8(RF09_IRQS, err);
         } else { // transceiver == RF24
@@ -1240,7 +1240,7 @@ namespace AT86RF215 {
         return 0;
     }
 
-    etl::expected<void, Error> At86rf215::check_transceiver_connection(Error& err) {
+    etl::expected<void, Error> At86rf215_Utilities::check_transceiver_connection(Error& err) {
         DevicePartNumber dpn = transceiver.get_part_number(err);
         if (err == Error::NO_ERRORS && dpn == DevicePartNumber::AT86RF215) {
             return {}; /// success
@@ -1249,7 +1249,7 @@ namespace AT86RF215 {
         }
     }
 
-    void At86rf215::set_bbc_fskc0_config(Transceiver transceiver,
+    void At86rf215_Utilities::set_bbc_fskc0_config(Transceiver transceiver,
                                          Bandwidth_time_product bt, Mod_index_scale midxs, Mod_index midx, FSK_mod_order mord,
                                          Error& err) {
         // Define the appropriate register for BBCn_FSKC0 based on the transceiver
@@ -1276,7 +1276,7 @@ namespace AT86RF215 {
         // Write the updated value back to the register
         spi_write_8(reg_address, reg_value, err);
     }
-    void At86rf215::set_bbc_fskc1_config(Transceiver transceiver,
+    void At86rf215_Utilities::set_bbc_fskc1_config(Transceiver transceiver,
                                          Freq_Inversion freq_inv, MR_FSK_symbol_rate sr,
                                          Error& err) {
         // Define the appropriate register for BBCn_FSKC1 based on the transceiver
@@ -1299,7 +1299,7 @@ namespace AT86RF215 {
         // Write the updated value back to the register
         spi_write_8(reg_address, reg_value, err);
     }
-    void At86rf215::set_bbc_fskc2_config(Transceiver transceiver, Preamble_Detection preamble_det,
+    void At86rf215_Utilities::set_bbc_fskc2_config(Transceiver transceiver, Preamble_Detection preamble_det,
                                          Receiver_Override rec_override,
                                          Receiver_Preamble_Timeout rec_preamble_timeout,
                                          Mode_Switch_Enable mode_switch_en,
@@ -1339,7 +1339,7 @@ namespace AT86RF215 {
         spi_write_8(reg_address, reg_value, err);
     }
 
-    void At86rf215::set_bbc_fskc3_config(Transceiver transceiver, SFD_Detection_Threshold sfdDetectionThreshold, Preamble_Detection_Threshold preambleDetectionThreshold, Error& err) {
+    void At86rf215_Utilities::set_bbc_fskc3_config(Transceiver transceiver, SFD_Detection_Threshold sfdDetectionThreshold, Preamble_Detection_Threshold preambleDetectionThreshold, Error& err) {
         // Define the appropriate register for BBCn_FSKC2 based on the transceiver
         RegisterAddress reg_address;
         if (transceiver == RF09) {
@@ -1361,7 +1361,7 @@ namespace AT86RF215 {
         spi_write_8(reg_address, reg_value, err);
     }
 
-    void At86rf215::set_bbc_fskc4_config(Transceiver transceiver,
+    void At86rf215_Utilities::set_bbc_fskc4_config(Transceiver transceiver,
                                          SFD_Quantization sfd_quantization,
                                          SFD_32 sfd_32,
                                          Raw_Mode_Reversal_Bit raw_mode_reversal,
@@ -1391,7 +1391,7 @@ namespace AT86RF215 {
         // Write the updated value back to the register
         spi_write_8(reg_address, reg_value, err);
     }
-    void At86rf215::set_bbc_fskphrtx(Transceiver transceiver, SFD_Used sfdUsed, Data_Whitening dataWhitening, Error& err) {
+    void At86rf215_Utilities::set_bbc_fskphrtx(Transceiver transceiver, SFD_Used sfdUsed, Data_Whitening dataWhitening, Error& err) {
         // Define the appropriate register address for BBC0_FSKPHRTX based on the transceiver
         RegisterAddress reg_address;
         if (transceiver == RF09) {
@@ -1413,7 +1413,7 @@ namespace AT86RF215 {
         spi_write_8(reg_address, reg_value, err);
     }
 
-    void At86rf215::set_bbc_fskdm(Transceiver transceiver, FSK_Preamphasis_Enable fskPreamphasisEnable, Direct_Mod_Enable_FSKDM directModEnableFskdm, Error& err) {
+    void At86rf215_Utilities::set_bbc_fskdm(Transceiver transceiver, FSK_Preamphasis_Enable fskPreamphasisEnable, Direct_Mod_Enable_FSKDM directModEnableFskdm, Error& err) {
         // Define the appropriate register address for BBCn_FSKDM based on the transceiver
         RegisterAddress reg_address;
         if (transceiver == RF09) {
@@ -1434,7 +1434,7 @@ namespace AT86RF215 {
         spi_write_8(reg_address, reg_value, err);
     }
 
-    etl::expected<uint16_t, Error> At86rf215::get_received_length(Transceiver transceiver, Error& err) {
+    etl::expected<uint16_t, Error> At86rf215_Utilities::get_received_length(Transceiver transceiver, Error& err) {
         RegisterAddress reg_address_low;
         RegisterAddress reg_address_high;
 
@@ -1461,7 +1461,7 @@ namespace AT86RF215 {
         return received_length;
     }
 
-    void At86rf215::print_state(Transceiver transceiver, Error& err) {
+    void At86rf215_Utilities::print_state(Transceiver transceiver, Error& err) {
         switch (State rf_state = get_state(transceiver, err)) {
             case State::RF_NOP:
                 LOG_DEBUG << "STATE: NOP";
@@ -1496,7 +1496,7 @@ namespace AT86RF215 {
         }
     }
 
-    void At86rf215::print_error(Error& err) {
+    void At86rf215_Utilities::print_error(Error& err) {
         if (err == Error::NO_ERRORS)
             return;
         switch (err) {
@@ -1554,7 +1554,7 @@ namespace AT86RF215 {
         }
     }
 
-    void At86rf215::handle_irq() {
+    void At86rf215_Utilities::handle_irq() {
         Error err = Error::NO_ERRORS;
        // BaseType_t xHigherPriorityTaskWoken = pdFALSE;
         /* Sub 1-GHz Transceiver */
@@ -1749,4 +1749,6 @@ namespace AT86RF215 {
             ReceiverFrameStart_flag = true;
         }
     }
+
+    auto tranceiverUtils = At86rf215_Utilities();
 } // namespace AT86RF215

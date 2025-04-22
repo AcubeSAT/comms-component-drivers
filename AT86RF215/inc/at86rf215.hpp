@@ -34,14 +34,14 @@ namespace AT86RF215 {
         return a & static_cast<uint8_t>(b);
     }
 
-    class At86rf215 {
+    class At86rf215_Utilities {
     public:
         /// Structs with register configurations
         GeneralConfiguration generalConfig;
         RXConfig rxConfig;
         TXConfig txConfig;
         BasebandCoreConfig basebandCoreConfig;
-        FrequencySynthesizer freqSynthesizerConfig;
+        FrequencySynthesizerConfig freqSynthesizerConfig;
         ExternalFrontEndConfig externalFrontEndConfig;
         BasebandCoreInterruptsConfig basebandCoreInterruptsConfig;
         RadioInterruptsConfig radioInterruptsConfig;
@@ -96,14 +96,18 @@ namespace AT86RF215 {
          *
          */
         // Constructor with general config only
-        At86rf215(SPI_HandleTypeDef* hspim)
+        At86rf215_Utilities()
                 : tx_ongoing_09(false), tx_ongoing_24(false), rx_ongoing_09(false),
-                  rx_ongoing_24(false), cca_ongoing_09(false), cca_ongoing_24(false), hspi(hspim) {
+                  rx_ongoing_24(false), cca_ongoing_09(false), cca_ongoing_24(false) {
             // Initialize the semaphore
             resources_mtx = xSemaphoreCreateMutexStatic(&mtx_buf);
             if (resources_mtx == nullptr) {
                 LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphore";
             }
+        }
+
+        void registerSPIHandle(SPI_HandleTypeDef* handle) {
+            hspi = handle;
         }
 
         void setGeneralConfig(GeneralConfiguration&& GeneralConfig) {
@@ -118,7 +122,7 @@ namespace AT86RF215 {
         void setBaseBandCoreConfig(BasebandCoreConfig&& BasebandCoreConfig) {
             basebandCoreConfig = std::move(BasebandCoreConfig); // Move the new config into rxConfig
         }
-        void setFrequencySynthesizerConfig(FrequencySynthesizer&& FrequencySynthesizer) {
+        void setFrequencySynthesizerConfig(FrequencySynthesizerConfig&& FrequencySynthesizer) {
             freqSynthesizerConfig = std::move(FrequencySynthesizer); // Move the new config into rxConfig
         }
         void setExternalFrontEndControlConfig(ExternalFrontEndConfig&& ExternalFrontEndConfig) {
@@ -281,7 +285,7 @@ namespace AT86RF215 {
          * @param frequencySynthesizerConfig Reference to configuration with frequency, channel mode and bandwidth
          * @param err				         Pointer to raised error
          */
-        void configure_pll(Transceiver transceiver, FrequencySynthesizer& frequencySynthesizerConfig, Error& err);
+        void configure_pll(Transceiver transceiver, FrequencySynthesizerConfig& frequencySynthesizerConfig, Error& err);
 
         /**
          * Gets the part number of the device
@@ -781,5 +785,5 @@ namespace AT86RF215 {
         SPI_HandleTypeDef* hspi;
     };
 
-    extern At86rf215 transceiver;
+    extern At86rf215_Utilities transceiverUtils;
 } // namespace AT86RF215

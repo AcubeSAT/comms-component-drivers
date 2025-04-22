@@ -429,7 +429,7 @@ namespace AT86RF215 {
         }
     };
 
-    struct FrequencySynthesizer {
+    struct FrequencySynthesizerConfig {
         /// This is a flag for setup(), so an error may be thrown in case the config was not initialized properly
         bool validConfig09, validConfig24;
 
@@ -441,8 +441,8 @@ namespace AT86RF215 {
         /// RFn_PLL
         PLLBandwidth loopBandwidth09, loopBandwidth24;
 
-        static FrequencySynthesizer DefaultFrequencySynthesizerConfig() {
-            FrequencySynthesizer fs;
+        static FrequencySynthesizerConfig DefaultFrequencySynthesizerConfig() {
+            FrequencySynthesizerConfig fs;
             fs.setup_FrequencySynthesizer(Transceiver::RF09, 436500, PLLChannelMode::FineResolution450, PLLBandwidth::BWDefault);
             fs.setup_FrequencySynthesizer(Transceiver::RF24, 2425000, PLLChannelMode::FineResolution2443, PLLBandwidth::BWDefault);
             return fs;
