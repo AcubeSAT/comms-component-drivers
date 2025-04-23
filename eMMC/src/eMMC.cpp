@@ -1,244 +1,322 @@
+#include <cstring>
 #include "eMMC.hpp"
+#include "Logger.hpp"
 
 namespace eMMC {
     eMMC_Utilities::eMMC_Utilities() {
         eMMC_semaphoreHandle = xSemaphoreCreateMutexStatic(&eMMC_semaphoreBuffer);
 
-    // Initialize the memoryMap array using the sizes from MemoryItems.def
+        // Initialize the memoryMap array using the sizes from MemoryItems.def
 #define MEMORY_ITEM(name, size) memoryItemMap[name] = MemoryItemHandler(size);
 #include "MemoryItems.def"
 #undef MEMORY_ITEM
 
-    // Initialize the queue map array using MemoryQueues.def
-#define MEMORY_QUEUE(queue_name, item_size, queue_size)                                                                                         \
-    queue_name##Queue = xQueueCreateStatic(queue_size, sizeof(MemoryQueueHandler), queue_name##QueueStorageArea, &queue_name##QueueBuffer);     \
-    vQueueAddToRegistry(queue_name##Queue, " queue_name queue");                                                                                \
-    memoryQueueMap[queue_name] = MemoryQueueHandler(item_size, queue_size, &queue_name##Queue);
+        // Calculate MemoryItemHandler parameters
+        uint64_t headBlockPointer = 0;
+        for (uint8_t i = 0; i < memoryItemCount; i++) {
+            if (memoryItemMap[i].size == 0) {
+                LOG_ERROR << "[EMMC Driver] Inserted item with 0 length!";
+            }
+
+            memoryItemMap[i].startBlockAddress = headBlockPointer;
+            memoryItemMap[i].hasPartialBlock = static_cast<bool>(memoryItemMap[i].size % blockSize);
+            headBlockPointer += memoryItemMap[i].size / blockSize + static_cast<uint64_t>(memoryItemMap[i].hasPartialBlock); // points one block past the end address
+
+            if (headBlockPointer > static_cast<uint64_t>(blockCount)) {
+                LOG_ERROR << "[EMMC Driver] Failed to allocate memory sections. Surpassed memory constraints!";
+                return;
+            }
+            memoryItemMap[i].endBlockAddress = headBlockPointer - 1;
+            memoryItemMap[i].semaphoreHandle = xSemaphoreCreateMutexStatic(&memoryItemMap[i].semaphoreBuffer);
+        }
+
+        // Initialize the queue map array using MemoryQueues.def
+#define MEMORY_QUEUE(queue_name, item_size, queue_size) memoryQueueMap[queue_name] = MemoryQueueHandler(item_size, queue_size);
 #include "MemoryQueues.def"
 #undef MEMORY_QUEUE
 
-    // TODO ?
-    if (memoryItemMap[0].endAddress != 0) {
-        __NOP();
-    }
-
-    uint64_t headPointer = 0;
-    for (int i = 0; i < memoryItemCount; i++) {
-        headPointer += memoryItemMap[i].size;
-        if (headPointer > memorySizeInBytes) {
-            // TODO memory full error
-        } else {
-            memoryItemMap[i].endAddress = headPointer;
-            memoryItemMap[i].startAddress = headPointer - memoryItemMap[i].size;
-        }
-
-        // align for page size (512 bytes)
-        headPointer += memoryPageSize - (headPointer % memoryPageSize);
-    }
-
-    for (int i = 0; i < memoryQueueCount; i++) {
-        uint32_t pagesPerItem = memoryQueueMap[i].sizeOfItem / memoryPageSize;
-        if (pagesPerItem * memoryPageSize < memoryQueueMap[i].sizeOfItem) { // if item size is not multiple of page size
-            pagesPerItem++;
-        }
-        uint64_t wholeSizeInBytes = memoryPageSize * pagesPerItem * memoryQueueMap[i].numberOfItems;
-        headPointer += wholeSizeInBytes;
-        if (headPointer > memorySizeInBytes) {
-            // TODO memory full error
-        } else {
-            memoryQueueMap[i].startAddress = headPointer - wholeSizeInBytes;
-            memoryQueueMap[i].firstPage = memoryQueueMap[i].startAddress / memoryPageSize;
-            memoryQueueMap[i].lastPage = memoryQueueMap[i].firstPage + (pagesPerItem * memoryQueueMap[i].numberOfItems);
-        }
-    }
-
-    // float eMMC_usage = (100 * static_cast<float>(headPointer)) / static_cast<float>(memoryCapacity);
-
-    // TODO ?
-    if (memoryItemMap[0].endAddress != 0) {
-        __NOP();
-    }
-    __NOP();
-}
-
-    etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, uint8_t* destBuffer, const uint32_t bufferSize) {
-        const MemoryItemHandler itemHandler = memoryItemMap[item];
-
-        if (bufferSize < itemHandler.size) {
-            return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
-        }
-        uint32_t continuousPages = itemHandler.size / memoryPageSize;
-        if (continuousPages > 0) {
-            for (uint32_t i = 0; i < continuousPages; i++) {
-                /// TODO: handle errors
-                if (auto status = readBlockEMMC(destBuffer + (i * memoryPageSize), itemHandler.startAddress + (i * memoryPageSize), 1); !status.has_value()) {
-                    return status;
-                }
+        // Calculate QueueHandler parameters
+        for (uint8_t i = 0; i < memoryQueueCount; i++) {
+            if (memoryQueueMap[i].itemSize == 0 || memoryQueueMap[i].maxNumberOfItems == 0) {
+                LOG_ERROR << "[EMMC Driver] Inserted queue with item size or queue length of 0!";
             }
+
+            memoryQueueMap[i].itemHasPartialBlock = memoryQueueMap[i].itemSize % blockSize;
+            memoryQueueMap[i].slotBlockSize = memoryQueueMap[i].itemSize / blockSize + memoryQueueMap[i].itemHasPartialBlock;
+            memoryQueueMap[i].startBlockAddress = headBlockPointer;
+            headBlockPointer += memoryQueueMap[i].slotBlockSize * memoryQueueMap[i].maxNumberOfItems; // points one block past the end address
+
+            if (headBlockPointer > static_cast<uint64_t>(blockCount)) {
+                LOG_ERROR << "[EMMC Driver] Failed to allocate memory sections. Surpassed memory constraints!";
+                return;
+            }
+            memoryQueueMap[i].endBlockAddress = headBlockPointer - 1;
+            memoryQueueMap[i].semaphoreHandle = xSemaphoreCreateMutexStatic(&memoryQueueMap[i].semaphoreBuffer);
         }
 
-        // compensate for item sizes not multiple of page size
-        uint8_t numberOfLastBytes = itemHandler.size % memoryPageSize;
-        if (numberOfLastBytes > 0) {
-            uint8_t lastPage[memoryPageSize];
-            /// TODO: handle errors
-            if (auto status = readBlockEMMC(lastPage, itemHandler.startAddress + continuousPages, 1); !status.has_value()) {
-                return status;
-            }
-            for (int i = 0; i < numberOfLastBytes; i++) {
-                destBuffer[(continuousPages * memoryPageSize) + i] = lastPage[i];
-            }
-        }
-        return {}; // success
+        emmcUsage = 100 * static_cast<float>(headBlockPointer-1) / blockCount;
     }
 
     etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, uint8_t* destBuffer, const uint32_t bufferSize, const uint32_t startBlock, const uint32_t numOfBlocks) {
-        const MemoryItemHandler itemHandler = memoryItemMap[item];
+        const MemoryItemHandler& itemHandler = memoryItemMap[item];
+        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
 
-        uint32_t storeDataSize = numOfBlocks * memoryPageSize;
-        if ((startBlock + numOfBlocks) * memoryPageSize > itemHandler.size) {
-            storeDataSize -= memoryPageSize - (itemHandler.size % memoryPageSize);
+        // requested block region checks
+        if (numOfBlocks == 0 || itemHandler.startBlockAddress + startBlock + (numOfBlocks - 1) > itemHandler.endBlockAddress) {
+            xSemaphoreGive(itemHandler.semaphoreHandle);
+            return etl::unexpected(Error::EMMC_INVALID_MEMORY_BLOCK_REGION);
         }
-        if (bufferSize < storeDataSize) {
-            return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
-        }
-        if ((startBlock * memoryPageSize) + (numOfBlocks * memoryPageSize) > itemHandler.size) {
-            if (numOfBlocks > 1) {
-                for (uint32_t i = 0; i < numOfBlocks - 1; i++) {
-                    /// TODO: handle errors
-                    if (auto status = readBlockEMMC(destBuffer + (i * memoryPageSize), itemHandler.startAddress + ((i + startBlock) * memoryPageSize), 1); !status.has_value()) {
-                        return status;
-                    }
-                }
+
+        // buffer size checks
+        const uint32_t lastRequestedBlock = itemHandler.startBlockAddress + startBlock + (numOfBlocks - 1);
+        const bool requestEndsOnLastItemBlock = (lastRequestedBlock == itemHandler.endBlockAddress);
+        if (!itemHandler.hasPartialBlock || // item is block aligned (not leftover bits in the end)
+            !requestEndsOnLastItemBlock) {     // OR the last block is not requested
+            // Standard check
+            if (bufferSize < numOfBlocks * blockSize) {
+                xSemaphoreGive(itemHandler.semaphoreHandle);
+                return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
             }
-            // compensate for item sizes not multiple of page size
-            uint8_t numberOfLastBytes = itemHandler.size % memoryPageSize;
-            if (numberOfLastBytes > 0) {
-                uint8_t lastPage[memoryPageSize];
-                uint32_t lastPageAdress = itemHandler.startAddress + ((itemHandler.size / memoryPageSize) * memoryPageSize);
-                /// TODO: handle errors
-                if (auto status = readBlockEMMC(lastPage, lastPageAdress, 1); !status.has_value()) {
+        } else { // the last requested block is the last item block AND there are leftover bits in the end
+            // The buffer can be smaller than numOfBlocks * blockSize
+            if (bufferSize < (numOfBlocks - 1) * blockSize + itemHandler.size % blockSize) {
+                xSemaphoreGive(itemHandler.semaphoreHandle);
+                return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
+            }
+        }
+
+        etl::expected<void, Error> status;
+        if (!itemHandler.hasPartialBlock ||  // item is block aligned (not leftover bits in the end)
+            !requestEndsOnLastItemBlock) {      // OR the last block is not requested
+            // so do a full read on the last requested block
+            status = readBlockEMMC(destBuffer, itemHandler.startBlockAddress + startBlock, numOfBlocks);
+            xSemaphoreGive(itemHandler.semaphoreHandle);
+            return status;
+        } else { // the last requested block is the last item block AND there are leftover bits in the end
+            // so the last block must only be partially copied
+
+            // full read (continuous blocks)
+            if (itemHandler.startBlockAddress + startBlock != itemHandler.endBlockAddress) { // check that there is actually more than one block to copy
+                status = readBlockEMMC(destBuffer, itemHandler.startBlockAddress + startBlock, numOfBlocks - 1);
+                if (!status.has_value()) {
+                    xSemaphoreGive(itemHandler.semaphoreHandle);
                     return status;
                 }
-                for (int i = 0; i < numberOfLastBytes; i++) {
-                    destBuffer[((numOfBlocks - 1) * memoryPageSize) + i] = lastPage[i];
-                }
             }
-        } else {
-            if (numOfBlocks > 0) {
-                for (uint32_t i = 0; i < numOfBlocks; i++) {
-                    /// TODO: handle errors
-                    if (auto status = readBlockEMMC(destBuffer + (i * memoryPageSize), itemHandler.startAddress + ((i + startBlock) * memoryPageSize), 1); !status.has_value()) {
-                        return status;
-                    }
-                }
-            }
-        }
 
-        return {}; // success
+            // partial read
+            uint8_t lastBlock[blockSize];
+            status = readBlockEMMC(lastBlock, lastRequestedBlock, 1);
+            if (!status.has_value()) {
+                xSemaphoreGive(itemHandler.semaphoreHandle);
+                return status;
+            }
+
+            // copy tail bytes from last block
+            std::memcpy(destBuffer + (numOfBlocks - 1) * blockSize, lastBlock, itemHandler.size % blockSize);
+
+            xSemaphoreGive(itemHandler.semaphoreHandle);
+            return {}; // success
+        }
+    }
+
+    etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, uint8_t* destBuffer, const uint32_t bufferSize) {
+        const MemoryItemHandler& itemHandler = memoryItemMap[item];
+        return getItem(item, destBuffer, bufferSize, 0, itemHandler.endBlockAddress - itemHandler.startBlockAddress + 1);
     }
 
     etl::expected<void, Error> eMMC_Utilities::storeItem(const MemoryItem item, uint8_t* sourceBuffer, const uint32_t bufferSize) {
-        const MemoryItemHandler itemHandler = memoryItemMap[item];
+        const MemoryItemHandler& itemHandler = memoryItemMap[item];
+        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
 
         if (bufferSize < itemHandler.size) {
+            xSemaphoreGive(itemHandler.semaphoreHandle);
             return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
         }
-        uint32_t continuousPages = itemHandler.size / memoryPageSize;
 
-        if (continuousPages > 0) {
-            for (uint32_t i = 0; i < continuousPages; i++) {
-                // handle errors
-                if (auto status = writeBlockEMMC(sourceBuffer + (i * memoryPageSize), itemHandler.startAddress + (i * memoryPageSize), 1); !status.has_value()) {
-                    return status;
-                }
-            }
-        }
-
-        //compensate for item sizes not multiple of page size
-        uint8_t numberOfLastBytes = itemHandler.size % memoryPageSize;
-        if (numberOfLastBytes > 0) {
-            uint8_t lastPage[memoryPageSize];
-            for (int i = 0; i < numberOfLastBytes; i++) {
-                lastPage[i] = sourceBuffer[(continuousPages * memoryPageSize) + i];
-            }
-            // handle errors
-            if (auto status = writeBlockEMMC(lastPage, itemHandler.startAddress + continuousPages, 1); !status.has_value()) {
+        // full read (continuous pages)
+        etl::expected<void, Error> status;
+        const uint32_t continuousPages = itemHandler.size / blockSize;
+        if (continuousPages != 0) {
+            status = writeBlockEMMC(sourceBuffer, itemHandler.startBlockAddress, continuousPages);
+            if (!status.has_value()) {
+                xSemaphoreGive(itemHandler.semaphoreHandle);
                 return status;
             }
         }
+
+        // if the item is not a multiple of block size, the last block needs to be copied
+        // separately (due to sourceBuffer not being large enough)
+        if (itemHandler.hasPartialBlock) {
+            uint8_t lastBlock[blockSize] = {0};
+            std::memcpy(lastBlock, sourceBuffer + continuousPages * blockSize, itemHandler.size % blockSize);
+
+            status = writeBlockEMMC(lastBlock, itemHandler.endBlockAddress, 1);
+            if (!status.has_value()) {
+                xSemaphoreGive(itemHandler.semaphoreHandle);
+                return status;
+            }
+        }
+
+        xSemaphoreGive(itemHandler.semaphoreHandle);
         return {}; // success
     }
 
-    etl::expected<void, Error> eMMC_Utilities::storeItem(const MemoryItem item, uint8_t* sourceBuffer, const uint32_t bufferSize,
-                                               const uint32_t startBlock, const uint32_t numOfBlocks) {
-        const MemoryItemHandler itemHandler = memoryItemMap[item];
+    etl::pair<uint32_t, Error> eMMC_Utilities::popItemsFromQueue(const MemoryQueue queue, uint8_t* destBuffer, const uint32_t bufferSize, const uint32_t numItems) {
+        MemoryQueueHandler& queueHandler = memoryQueueMap[queue];
+        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::make_pair(0, Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
 
-        uint32_t storeDataSize = numOfBlocks * memoryPageSize;
-        if ((startBlock + numOfBlocks) * memoryPageSize > itemHandler.size) {
-            storeDataSize -= memoryPageSize - (itemHandler.size % memoryPageSize);
+        if (numItems == 0 || numItems > queueHandler.maxNumberOfItems) {
+            xSemaphoreGive(queueHandler.semaphoreHandle);
+            return etl::make_pair(0, Error::EMMC_INVALID_NUMBER_OF_ITEMS);
         }
-        if (bufferSize < storeDataSize) {
-            return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
+
+        if (queueHandler.currentNumberOfItems == 0) {
+            xSemaphoreGive(queueHandler.semaphoreHandle);
+            return etl::make_pair(0, Error::EMMC_QUEUE_EMPTY);
         }
-        if ((startBlock * memoryPageSize) + (numOfBlocks * memoryPageSize) > itemHandler.size) {
-            if (numOfBlocks > 1) {
-                for (uint32_t i = 0; i < numOfBlocks - 1; i++) {
-                    // TODO handle errors
-                    if (auto status = writeBlockEMMC(sourceBuffer + (i * memoryPageSize),
-                                                       itemHandler.startAddress + ((i + startBlock) * memoryPageSize),
-                                                       1); !status.has_value()) {
-                        return status;
+
+        const uint32_t itemsToPop =  numItems > queueHandler.currentNumberOfItems ? queueHandler.currentNumberOfItems : numItems;
+        if (bufferSize < queueHandler.itemSize * itemsToPop) {
+            xSemaphoreGive(queueHandler.semaphoreHandle);
+            return etl::make_pair(0, Error::EMMC_BUFFER_TOO_SMALL);
+        }
+
+        etl::expected<void, Error> status = {};
+        uint8_t lastBlock[blockSize] = {0}; // in case the items are not a multiple of the block size
+        for (uint32_t i = 0; i < itemsToPop; i++) {
+            if (queueHandler.itemHasPartialBlock) {
+                // full read for the continuous blocks
+                if (queueHandler.slotBlockSize != 1) {
+                    status = readBlockEMMC(destBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
+                        queueHandler.headSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize - 1);
+                    if (!status.has_value()) {
+                        // operation failed
+                        xSemaphoreGive(queueHandler.semaphoreHandle);
+                        return etl::make_pair(i, status.error());
                     }
                 }
+
+                // partial read for the last block
+                status = readBlockEMMC(lastBlock, queueHandler.startBlockAddress +
+                    queueHandler.headSlotPointer * queueHandler.slotBlockSize + (queueHandler.slotBlockSize - 1), 1);
+                if (!status.has_value()) {
+                    // operation failed
+                    xSemaphoreGive(queueHandler.semaphoreHandle);
+                    return etl::make_pair(i, status.error());
+                }
+                std::memcpy(destBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * blockSize, lastBlock, queueHandler.itemSize % blockSize);
+            } else {
+                status = readBlockEMMC(destBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
+                    queueHandler.headSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize);
+                if (!status.has_value()) {
+                    // operation failed
+                    xSemaphoreGive(queueHandler.semaphoreHandle);
+                    return etl::make_pair(i, status.error());
+                }
             }
 
-            //compensate for item sizes not multiple of page size
-            uint8_t numberOfLastBytes = itemHandler.size % memoryPageSize;
-            if (numberOfLastBytes > 0) {
-                uint8_t lastPage[memoryPageSize];
-                for (int i = 0; i < numberOfLastBytes; i++) {
-                    lastPage[i] = sourceBuffer[((numOfBlocks - 1) * memoryPageSize) + i];
-                }
-                uint32_t lastPageAdress = itemHandler.startAddress + ((itemHandler.size / memoryPageSize) *
-                    memoryPageSize);
-                // TODO handle errors
-                if (auto status = writeBlockEMMC(lastPage, lastPageAdress, 1); !status.has_value()) {
-                    return status;
-                }
-            }
-        } else {
-            if (numOfBlocks > 0) {
-                // auto status = eMMC::writeBlockEMMC(dataBuffer, itemHandler.startAddress + (startBlock * memoryPageSize), numOfBlocks);
-                // // handle errors
-                // if (!status.has_value()) {
-                //     return status;
-                // }
-                for (uint32_t i = 0; i < numOfBlocks; i++) {
-                    // TODO handle errors
-                    if (auto status = writeBlockEMMC(sourceBuffer + (i * memoryPageSize),
-                                                     itemHandler.startAddress + ((i + startBlock) *
-                                                         memoryPageSize),
-                                                     1); !status.has_value()) {
-                        return status;
-                    }
-                }
-            }
+            // operation successful -> move pointer
+            queueHandler.headSlotPointer = (queueHandler.headSlotPointer + 1) % queueHandler.maxNumberOfItems; // circular increment
+            queueHandler.currentNumberOfItems--;
         }
 
-        return {}; // success
+        xSemaphoreGive(queueHandler.semaphoreHandle);
+        return etl::make_pair(itemsToPop, Error::EMMC_NO_ERROR); // success
+    }
+
+    etl::pair<uint32_t, Error> eMMC_Utilities::pushItemsToQueue(const MemoryQueue queue, uint8_t* sourceBuffer, const uint32_t bufferSize, const uint32_t numItems) {
+        MemoryQueueHandler& queueHandler = memoryQueueMap[queue];
+        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::make_pair(0, Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
+
+        if (numItems == 0 || numItems > queueHandler.maxNumberOfItems) {
+            xSemaphoreGive(queueHandler.semaphoreHandle);
+            return etl::make_pair(0, Error::EMMC_INVALID_NUMBER_OF_ITEMS);
+        }
+
+        if (queueHandler.currentNumberOfItems == queueHandler.maxNumberOfItems) {
+            xSemaphoreGive(queueHandler.semaphoreHandle);
+            return etl::make_pair(0, Error::EMMC_QUEUE_FULL);
+        }
+
+        const uint32_t itemsToPush = numItems > (queueHandler.maxNumberOfItems - queueHandler.currentNumberOfItems) ?
+            (queueHandler.maxNumberOfItems - queueHandler.currentNumberOfItems) : numItems;
+        if (bufferSize < queueHandler.itemSize * itemsToPush) {
+            xSemaphoreGive(queueHandler.semaphoreHandle);
+            return etl::make_pair(0, Error::EMMC_BUFFER_TOO_SMALL);
+        }
+
+        etl::expected<void, Error> status;
+        for (uint32_t i = 0; i < itemsToPush; i++) {
+            if (queueHandler.itemHasPartialBlock) {
+                // full write (for continuous blocks)
+                if (queueHandler.slotBlockSize != 1) {
+                    status = writeBlockEMMC(sourceBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
+                        queueHandler.tailSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize - 1);
+                    if (!status.has_value()) {
+                        // operation failed
+                        xSemaphoreGive(queueHandler.semaphoreHandle);
+                        return etl::make_pair(i, status.error());
+                    }
+                }
+
+                // partial write for the last block (so there may be no reading beyond the sourceBuffer's edge)
+                uint8_t lastBlock[blockSize] = {0};
+                std::memcpy(lastBlock,
+                    sourceBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * blockSize,
+                    queueHandler.itemSize % blockSize);
+                status = writeBlockEMMC(lastBlock,
+                    queueHandler.startBlockAddress + queueHandler.tailSlotPointer * queueHandler.slotBlockSize + (queueHandler.slotBlockSize - 1),
+                    1);
+                if (!status.has_value()) {
+                    // operation failed
+                    xSemaphoreGive(queueHandler.semaphoreHandle);
+                    return etl::make_pair(i, status.error());
+                }
+            } else {
+                status = writeBlockEMMC(sourceBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
+                    queueHandler.tailSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize);
+                if (!status.has_value()) {
+                    // operation failed
+                    xSemaphoreGive(queueHandler.semaphoreHandle);
+                    return etl::make_pair(i, status.error());
+                }
+            }
+
+            // operation successful -> move pointer
+            queueHandler.tailSlotPointer = (queueHandler.tailSlotPointer + 1) % queueHandler.maxNumberOfItems; // circular increment
+            queueHandler.currentNumberOfItems++;
+        }
+
+        xSemaphoreGive(queueHandler.semaphoreHandle);
+        return etl::make_pair(itemsToPush, Error::EMMC_NO_ERROR);
     }
 
     etl::expected<void, Error> eMMC_Utilities::readBlockEMMC(uint8_t* destBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) const {
-        xSemaphoreTake(eMMC_semaphoreHandle, portMAX_DELAY);
+        if (xSemaphoreTake(eMMC_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
+
         eMMCTransactionFlags.ReadComplete = false;
         eMMCTransactionFlags.ErrorOccured = false;
-        eMMCTransactionFlags.transactionAborted = false;
+        eMMCTransactionFlags.TransactionAborted = false;
 
         if (HAL_MMC_ReadBlocks_IT(hmmc, destBuffer, block_address, numberOfBlocks) != HAL_OK) {
             xSemaphoreGive(eMMC_semaphoreHandle);
             return etl::unexpected(Error::EMMC_READ_FAILURE);
         }
+        //
+        // if (HAL_MMC_GetCardState(hmmc) != HAL_OK) {
+        //         return etl::unexpected(Error::EMMC_READ_FAILURE);
+        // }
 
         const uint32_t startTime = xTaskGetTickCount();
         while (true) {
@@ -249,7 +327,7 @@ namespace eMMC {
             }
 
             // Transaction timeout
-            if (xTaskGetTickCount() > ((transactionTimeoutPerBlock * numberOfBlocks) + startTime)) {
+            if (xTaskGetTickCount() - startTime> pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) {
                 xSemaphoreGive(eMMC_semaphoreHandle);
                 return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
             }
@@ -260,21 +338,33 @@ namespace eMMC {
                 xSemaphoreGive(eMMC_semaphoreHandle);
                 return etl::unexpected(Error::EMMC_READ_FAILURE);
             }
+
+            // Transaction aborted was called
+            if (eMMCTransactionFlags.TransactionAborted) {
+                /// TODO: handle the error, check hmmc handle for error messages.
+                xSemaphoreGive(eMMC_semaphoreHandle);
+                return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
+            }
         }
     }
 
     etl::expected<void, Error> eMMC_Utilities::writeBlockEMMC(const uint8_t* sourceBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
+        if (xSemaphoreTake(eMMC_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
 
-        xSemaphoreTake(eMMC_semaphoreHandle, portMAX_DELAY);
         eMMCTransactionFlags.WriteComplete = false;
         eMMCTransactionFlags.ErrorOccured = false;
-        eMMCTransactionFlags.transactionAborted = false;
+        eMMCTransactionFlags.TransactionAborted = false;
 
         if (HAL_MMC_WriteBlocks_IT(hmmc, sourceBuffer, block_address, numberOfBlocks) != HAL_OK) {
-
             xSemaphoreGive(eMMC_semaphoreHandle);
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
+
+        // if (HAL_MMC_GetCardState(hmmc) != HAL_OK) {
+        //     return etl::unexpected(Error::EMMC_WRITE_FAILURE);
+        // }
 
         const uint32_t startTime = xTaskGetTickCount();
         while (true) {
@@ -285,7 +375,7 @@ namespace eMMC {
             }
 
             // Transaction timeout
-            if (xTaskGetTickCount() > ((transactionTimeoutPerBlock * numberOfBlocks) + startTime)) {
+            if (xTaskGetTickCount() - startTime > pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) {
                 xSemaphoreGive(eMMC_semaphoreHandle);
                 return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
             }
@@ -296,77 +386,35 @@ namespace eMMC {
                 xSemaphoreGive(eMMC_semaphoreHandle);
                 return etl::unexpected(Error::EMMC_WRITE_FAILURE);
             }
+
+            // Transaction aborted was called
+            if (eMMCTransactionFlags.TransactionAborted) {
+                /// TODO: handle the error, check hmmc handle for error messages.
+                xSemaphoreGive(eMMC_semaphoreHandle);
+                return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
+            }
         }
     }
 
-    etl::expected<void, Error> eMMC_Utilities::eraseBlocksEMMC(const uint32_t block_address_start,const  uint32_t block_address_end) {
-        if (block_address_start > block_address_end)
-            return etl::unexpected(Error::EMMC_INVALID_START_ADDRESS_ON_ERASE);
-        if (HAL_MMC_Erase(hmmc, block_address_start, block_address_end) != HAL_OK)
+    etl::expected<void, Error> eMMC_Utilities::eraseBlocksEMMC(const uint32_t block_address_start, const  uint32_t block_address_end) {
+        if (xSemaphoreTake(eMMC_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
+
+        if (block_address_start > block_address_end) {
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return etl::unexpected(Error::EMMC_INVALID_MEMORY_BLOCK_REGION);
+        }
+
+        if (HAL_MMC_Erase(hmmc, block_address_start, block_address_end) != HAL_OK) {
+            xSemaphoreGive(eMMC_semaphoreHandle);
             return etl::unexpected(Error::EMMC_ERASE_BLOCK_FAILURE);
+        }
+
+        xSemaphoreGive(eMMC_semaphoreHandle);
         return {}; // success
     }
 
     eMMC_Utilities eMMC_Utils = eMMC_Utilities();
     EMMCTransactionFlags eMMCTransactionFlags;
 } // namespace eMMC
-
-// etl::expected<void, Error> eMMC::getItemFromQueue(memoryQueueHandler queueHandler, memoryQueueItemHandler itemHandler, uint8_t* buffer, uint32_t bufferSize) {
-//
-//     if (bufferSize < itemHandler.size) {
-//         return etl::unexpected<Error>(Error::EMMC_BUFFER_TOO_SMALL);
-//     }
-//     uint8_t localBuffer[memoryPageSize];
-//     auto status = eMMC::readBlockEMMC(localBuffer, itemHandler.startPage * memoryPageSize, 1);
-//     /// TODO: handle errors
-//     if (!status.has_value()) {
-//         return status;
-//     }
-//
-//     uint32_t pageCounter = 0;
-//     for (int i = 0; i < itemHandler.size; i++) {
-//         buffer[i] = localBuffer[i - (pageCounter * memoryPageSize)];
-//         if (i >= ((pageCounter + 1) * memoryPageSize) - 1) {
-//             pageCounter++;
-//             status = eMMC::readBlockEMMC(localBuffer, memoryPageSize * (pageCounter + itemHandler.startPage), 1);
-//             /// TODO: handle errors
-//             if (!status.has_value()) {
-//                 return status;
-//             }
-//         }
-//     }
-//
-//     return {}; // success
-// }
-
-
-// etl::expected<void, Error> eMMC::storeItemInQueue(memoryQueueHandler queueHandler, memoryQueueItemHandler* itemHandler, uint8_t* buffer, uint32_t bufferSize) {
-//     if (bufferSize < itemHandler->size) {
-//         return etl::unexpected<Error>(Error::EMMC_BUFFER_TOO_SMALL);
-//     }
-//     itemHandler->startPage = queueHandler.tailPageOffset + queueHandler.firstPage;
-//     queueHandler.tailPageOffset++;
-//     if (queueHandler.tailPageOffset > queueHandler.lastPage - queueHandler.firstPage) {
-//         queueHandler.tailPageOffset = 0;
-//     }
-//     uint8_t localBuffer[memoryPageSize];
-//     uint32_t pageCounter = 0;
-//     for (int i = 0; i < itemHandler->size; i++) {
-//         localBuffer[i - (pageCounter * memoryPageSize)] = buffer[i];
-//         if (i >= (memoryPageSize * (pageCounter + 1)) - 1 || i == (itemHandler->size - 1)) {
-//             auto status = eMMC::writeBlockEMMC(localBuffer, (itemHandler->startPage + pageCounter) * memoryPageSize, 1);
-//             pageCounter++;
-//             /// TODO: handle errors
-//             if (!status.has_value()) {
-//                 return status;
-//             }
-//         }
-//     }
-//     return {}; // success
-// }
-
-
-
-
-
-
