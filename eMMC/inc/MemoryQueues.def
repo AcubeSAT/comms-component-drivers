@@ -1,5 +1,5 @@
 // MEMORY_QUEUE(name, sizeOfItem, numberOfItems)
-MEMORY_QUEUE(subBlockTest, 200, 3)
-MEMORY_QUEUE(blockAlignedTest, 512, 3)
-MEMORY_QUEUE(nonBlockAlignedTest, 600, 3)
+MEMORY_QUEUE(queueSubBlockTest, 200, 3)
+MEMORY_QUEUE(queueBlockAlignedTest, 512, 3)
+MEMORY_QUEUE(queueNonBlockAlignedTest, 600, 3)
 // Add more queues here...
