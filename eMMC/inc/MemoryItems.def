@@ -1,4 +1,6 @@
 // MEMORY_ITEM(name, sizeInBytes)
-MEMORY_ITEM(test2, 1234)
+MEMORY_ITEM(subBlockTest, 200)
+MEMORY_ITEM(blockAlignedTest, 1024)
+MEMORY_ITEM(nonBlockAlignedTest, 1200)
 // Add more items here...
 
