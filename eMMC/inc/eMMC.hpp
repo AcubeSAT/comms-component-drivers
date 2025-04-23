@@ -62,6 +62,9 @@ namespace eMMC {
     public:
         explicit eMMC_Utilities();
 
+        /**
+         * @warning This method must be called before using the driver.
+         */
         void registerMMC(MMC_HandleTypeDef* handle) {
             hmmc = handle;
         }
@@ -113,6 +116,10 @@ namespace eMMC {
             return memoryQueueMap[queue].currentNumberOfItems;
         }
 
+        uint32_t getQueueElementSize(const MemoryQueue queue) {
+            return memoryQueueMap[queue].itemSize;
+        }
+
         /**
          * @brief Pop one or more items from the queue. The items are returned in the order they are popped.
          * @note In the scenario the item size is not a multiple of the block size, the function ensures that the leftover
@@ -127,6 +134,15 @@ namespace eMMC {
          */
         etl::pair<uint32_t, Error> pushItemsToQueue(MemoryQueue queue, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t numItems);
 
+        /**
+         * @brief Utility function. Write to eMMC blocks.
+         */
+        etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+
+        /**
+         * @brief Utility function. Read from eMMC blocks.
+         */
+        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks) const;
     private:
         /**
          * Size parameters for the SDINBDG4-8G
@@ -190,16 +206,6 @@ namespace eMMC {
         };
 
         etl::array<MemoryQueueHandler, memoryQueueCount> memoryQueueMap;
-
-        /**
-         * @brief Write to eMMC blocks
-         */
-        etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
-
-        /**
-         * @brief Read from eMMC blocks
-         */
-        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks) const;
 
         /**
          * @brief Erases specified memory region from eMMC
