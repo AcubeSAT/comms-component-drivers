@@ -2,14 +2,749 @@
 #include "Task.hpp"
 
 namespace AT86RF215 {
+    /** =========== Driver's public interface  =========== **/
+
+    State At86rf215_Utilities::get_state(Transceiver transceiver, Error& err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return State::RF_INVALID;
+        }
+        State state = get_state_private(transceiver, err);
+        xSemaphoreGive(resourcesMutexHandle);
+        return state;
+    }
+
+    void At86rf215_Utilities::set_state(Transceiver transceiver, State state_cmd,
+                              Error& err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        if (transceiver == RF09 && transceiverOccupied09) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        if (transceiver == RF24 && transceiverOccupied24) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        set_state_private(transceiver, state_cmd, err);
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    void At86rf215_Utilities::chip_reset(Error& error) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            error = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        // Chip reset
+        spi_write_8(RegisterAddress::RF_RST, 0x07, error);
+
+        // Reset IRQ status registers
+        spi_read_8(RegisterAddress::RF09_IRQS, error);
+        spi_read_8(RegisterAddress::RF24_IRQS, error);
+        spi_read_8(RegisterAddress::BBC0_IRQS, error);
+        spi_read_8(RegisterAddress::BBC1_IRQS, error);
+
+        // Restores the current config settings
+        setup(error);
+
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    etl::expected<void, Error> At86rf215_Utilities::check_transceiver_connection(Error& err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return etl::unexpected(err);
+        }
+
+        const DevicePartNumber dpn = get_part_number(err);
+        if (err == Error::NO_ERRORS && dpn == DevicePartNumber::AT86RF215) {
+            xSemaphoreGive(resourcesMutexHandle);
+            return {}; /// success
+        } else {
+            xSemaphoreGive(resourcesMutexHandle);
+            return etl::unexpected<Error>(err);
+        }
+    }
+
+    int8_t At86rf215_Utilities::clear_channel_assessment(Transceiver transceiver, Error& err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return 0;
+        }
+
+        bool& transceiverOccupied = transceiver == RF09 ? transceiverOccupied09 : transceiverOccupied24;
+
+        if (transceiverOccupied) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            xSemaphoreGive(resourcesMutexHandle);
+            return 0;
+        }
+
+        if (transceiver == RF09) {
+            userRequest09 = UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT;
+        } else {
+            userRequest24 = UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT;
+        }
+
+        set_state_private(transceiver, State::RF_TXPREP, err);
+        xSemaphoreGive(resourcesMutexHandle);
+
+        // wait for the one shot measurement to finish
+        if (transceiver == RF09) {
+            if (xSemaphoreTake(basebandTx09SemaphoreHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                err = Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED;
+                return 0;
+            }
+        } else {
+            if (xSemaphoreTake(basebandTx24SemaphoreHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                err = Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED;
+                return 0;
+            }
+        }
+
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return 0;
+        }
+        const int8_t energyMeasurement = transceiver == RF09 ? energy_measurement09 : energy_measurement24;
+        xSemaphoreGive(resourcesMutexHandle);
+        return energyMeasurement;
+    }
+
+    // TODO: Upon reaching RX state
+    // wait 8μs + RXDFE.SR + Tu
+    // read rssi
+    void At86rf215_Utilities::packetTransmissionBaseband(Transceiver transceiver,
+                                               uint8_t* packet, uint16_t length, Error& err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        bool& transceiverOccupied = transceiver == RF09 ? transceiverOccupied09 : transceiverOccupied24;
+
+        if (transceiverOccupied) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        RegisterAddress regtxflh;
+        RegisterAddress regtxfll;
+        RegisterAddress regfbtxs;
+
+        if (transceiver == RF09) {
+            regtxflh = BBC0_TXFLH;
+            regtxfll = BBC0_TXFLL;
+            regfbtxs = BBC0_FBTXS;
+        } else { // transceiver == RF24
+            regtxflh = BBC1_TXFLH;
+            regtxfll = BBC1_TXFLL;
+            regfbtxs = BBC1_FBTXS;
+        }
+
+        // write length to register
+        spi_write_8(regtxfll, length & 0xFF, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+        spi_write_8(regtxflh, (length >> 8) & 0x07, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        // write to tx frame buffer
+        spi_block_write_8(regfbtxs, length, packet, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        if (transceiver == RF09) {
+            userRequest09 = UserRequest::BASEBAND_TX;
+        } else {
+            userRequest24 = UserRequest::BASEBAND_TX;
+        }
+
+        set_state_private(transceiver, State::RF_TXPREP, err);
+        xSemaphoreGive(resourcesMutexHandle);
+
+        // wait for the semaphore tx complete semaphore, to ensure the operation
+        // was completed
+        if (transceiver == RF09) {
+            if (xSemaphoreTake(basebandTx09SemaphoreHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                err = Error::TRANSMISSION_FAILED;
+            }
+        } else {
+            if (xSemaphoreTake(basebandTx24SemaphoreHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                err = Error::TRANSMISSION_FAILED;
+            }
+        }
+    }
+
+    void At86rf215_Utilities::preparePacketReceptionBaseband(Transceiver transceiver, uint8_t* destBuff, Error &err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        bool& transceiverOccupied = transceiver == RF09 ? transceiverOccupied09 : transceiverOccupied24;
+
+        if (transceiverOccupied) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        if (transceiver == RF09) {
+            userRequest09 = UserRequest::BASEBAND_RX;
+            destBuffer09 = destBuff;
+        } else {
+            userRequest24 = UserRequest::BASEBAND_RX;
+            destBuffer24 = destBuff;
+        }
+        set_state_private(transceiver, State::RF_TXPREP, err);
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    uint16_t At86rf215_Utilities::waitForPacketReceptionBaseband(Transceiver transceiver, Error &err) {
+        // wait until a new packet is received
+        if (transceiver == RF09) {
+            xSemaphoreTake(basebandRx09SemaphoreHandle, portMAX_DELAY);
+        } else {
+            xSemaphoreTake(basebandRx24SemaphoreHandle, portMAX_DELAY);
+        }
+
+        // return the length
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return 0;
+        }
+
+        const uint16_t length = transceiver == RF09 ? received_packet_length09 : received_packet_length24;
+        xSemaphoreGive(resourcesMutexHandle);
+        return length;
+    }
+
+    void At86rf215_Utilities::packetTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        bool& transceiverOccupied = transceiver == RF09 ? transceiverOccupied09 : transceiverOccupied24;
+
+        if (transceiverOccupied) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        if (transceiver == RF09) {
+            userRequest09 = UserRequest::IQ_EEC_TX;
+        } else {
+            userRequest24 = UserRequest::IQ_EEC_TX;
+        }
+        set_state_private(transceiver, State::RF_TXPREP, err);
+        xSemaphoreGive(resourcesMutexHandle);
+
+        // wait for the baseband processor to end transmission
+        if (transceiver == RF09) {
+            if (xSemaphoreTake(iqEecTransmissionCompleteSemaphoreHandle09, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                err = Error::TRANSMISSION_FAILED;
+                transceiverOccupied09 = false;
+                return;
+            }
+        } else {
+            if (xSemaphoreTake(iqEecTransmissionCompleteSemaphoreHandle24, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                err = Error::TRANSMISSION_FAILED;
+                transceiverOccupied24 = false;
+                return;
+            }
+        }
+
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        // Assuming the resource mutex was obtained immediately, we need to wait t_tx_proc_delay for the
+        // transceiver to finish transmitting the I/Q samples, and t_pa_ram for the amp to ramp down (figure 7-6).
+        // The longest possible wait is  13.75us + 32us = 45.75us (tables 6-1, 6-3).
+        uint8_t tries = 0;
+        State state;
+
+        // poll the state of the transceiver, until it reaches state TX_PREP
+        // TODO maybe use __NOP() in a for loop to wait instead
+        do {
+            state = get_state_private(transceiver, err);
+            tries++;
+            if (err != Error::NO_ERRORS) {
+                break;
+            }
+        } while (state == State::RF_TX && tries < 60);
+
+        if (tries >= 60 || err != Error::NO_ERRORS) {
+            err = Error::FAILED_CHANGING_STATE;
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        // transmission is finished, now the transceiver can be freed up
+        if (transceiver == RF09) {
+            transceiverOccupied09 = false;
+        } else {
+            transceiverOccupied24 = false;
+        }
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    void At86rf215_Utilities::preparePacketReceptionIQ(Transceiver transceiver, Error &err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        bool& transceiverOccupied = transceiver == RF09 ? transceiverOccupied09 : transceiverOccupied24;
+
+        if (transceiverOccupied) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        if (transceiver == RF09) {
+            userRequest09 = UserRequest::IQ_RX;
+        } else {
+            userRequest24 = UserRequest::IQ_RX;
+        }
+        set_state_private(transceiver, State::RF_TXPREP, err);
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    void At86rf215_Utilities::waitForPacketReceptionIQ(Transceiver transceiver, Error& err) {
+        // wait until a preamble is detected
+        if (transceiver == RF09) {
+            xSemaphoreTake(iqPreambleReceptionSemaphoreHandle09, portMAX_DELAY);
+        } else {
+            xSemaphoreTake(iqPreambleReceptionSemaphoreHandle24, portMAX_DELAY);
+        }
+
+        // "lock" the transceiver and freeze the agc
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        if (transceiver == RF09) {
+            transceiverOccupied09 = true;
+        } else {
+            transceiverOccupied24 = true;
+        }
+
+        RegisterAddress agcc = transceiver == RF09 ? RegisterAddress::RF09_AGCC : RegisterAddress::RF24_AGCC;
+
+        uint8_t regVal = spi_read_8(agcc, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        spi_write_8(agcc, regVal | 0x02, err);
+        xSemaphoreGive(resourcesMutexHandle);
+
+        // wait for packet reception
+        if (transceiver == RF09) {
+            if (xSemaphoreTake(iqPacketReceptionSemaphoreHandle09, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                err = Error::RECEPTION_FAILED;
+                transceiverOccupied09 = false;
+                return;
+            }
+        } else {
+            if (xSemaphoreTake(iqPacketReceptionSemaphoreHandle24, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                err = Error::RECEPTION_FAILED;
+                transceiverOccupied24 = false;
+                return;
+            }
+        }
+
+        // "unlock" the transceiver and release the AGC
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        regVal = spi_read_8(agcc, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        spi_write_8(agcc, regVal & 0xFD, err);
+
+        if (transceiver == RF09) {
+            transceiverOccupied09 = false;
+        } else {
+            transceiverOccupied24 = false;
+        }
+
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    void At86rf215_Utilities::print_state(Transceiver transceiver, Error& err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        switch (State rf_state = get_state_private(transceiver, err)) {
+            case State::RF_NOP:
+                LOG_DEBUG << "STATE: NOP";
+                break;
+            case State::RF_SLEEP:
+                LOG_DEBUG << "STATE: SLEEP";
+                break;
+            case State::RF_TRXOFF:
+                LOG_DEBUG << "STATE: TRXOFF";
+                break;
+            case State::RF_TX:
+                LOG_DEBUG << "STATE: TX";
+                break;
+            case State::RF_RX:
+                LOG_DEBUG << "STATE: RX";
+                break;
+            case State::RF_TRANSITION:
+                LOG_DEBUG << "STATE: TRANSITION";
+                break;
+            case State::RF_RESET:
+                LOG_DEBUG << "STATE: RESET";
+                break;
+            case State::RF_INVALID:
+                LOG_DEBUG << "STATE: INVALID";
+                break;
+            case State::RF_TXPREP:
+                LOG_DEBUG << "STATE: TXPREP";
+                break;
+            default:
+                LOG_ERROR << "UNDEFINED";
+                break;
+        }
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    void At86rf215_Utilities::print_error(Error& err) {
+        if (err == Error::NO_ERRORS)
+            return;
+        switch (err) {
+            case Error::FAILED_WRITING_TO_REGISTER:
+                LOG_ERROR << "FAILED_WRITING_TO_REGISTER";
+                break;
+
+            case Error::FAILED_READING_FROM_REGISTER:
+                LOG_ERROR << "FAILED_READING_FROM_REGISTER";
+                break;
+
+            case Error::FAILED_CHANGING_STATE:
+                LOG_ERROR << "FAILED_CHANGING_STATE";
+                break;
+
+            case Error::UKNOWN_REQUESTED_STATE:
+                LOG_ERROR << "UNKNOWN_REQUESTED_STATE";
+                break;
+
+            case Error::UKNOWN_PART_NUMBER:
+                LOG_ERROR << "UNKNOWN_PART_NUMBER";
+                break;
+
+            case Error::INVALID_TRANSCEIVER_FREQ:
+                LOG_ERROR << "INVALID_TRANSCEIVER_FREQ";
+                break;
+
+            case Error::INVALID_STATE_FOR_OPERATION:
+                LOG_ERROR << "INVALID_STATE_FOR_OPERATION";
+                break;
+
+            case Error::INVALID_PLL_CENTER_FREQ:
+                LOG_ERROR << "INVALID_PLL_CENTER_FREQ";
+                break;
+
+            case Error::UKNOWN_DEVICE_PART_NUMBER:
+                LOG_ERROR << "UNKNOWN_DEVICE_PART_NUMBER";
+                break;
+
+            case Error::INVALID_RSSI_MEASUREMENT:
+                LOG_ERROR << "INVALID_RSSI_MEASUREMENT";
+                break;
+
+            case Error::INVALID_AGC_CONTROl_WORD:
+                LOG_ERROR << "INVALID_AGC_CONTROl_WORD";
+                break;
+
+            case Error::ONGOING_TRANSMISSION_RECEPTION:
+                LOG_ERROR << "ONGOING_TRANSMISSION_RECEPTION";
+                break;
+
+            case Error::RESOURCE_MUTEX_TIMEOUT:
+                LOG_ERROR << "MUTEX_TIMEOUT";
+                break;
+
+            case Error::TRANSMISSION_FAILED:
+                LOG_ERROR << "BASEBAND_TRANSMISSION_FAILED";
+
+            case Error::RECEPTION_FAILED:
+                LOG_ERROR << "BASEBAND_RECEPTION_FAILED";
+
+            case Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED:
+                LOG_ERROR << "SINGLE_SHOT_MEASUREMENT_FAILED";
+
+            default:
+                LOG_ERROR << "UNHANDLED_ERROR";
+                break;
+        }
+    }
+
+    void At86rf215_Utilities::handle_irq(Error &err) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        // BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        /* Sub 1-GHz Transceiver */
+
+        // Radio IRQ
+        volatile uint8_t irq = spi_read_8(RegisterAddress::RF09_IRQS, err);
+        if ((irq & InterruptMask::IFSynchronization) != 0) {
+            // I/Q IF Synchronization Failure handling
+            IFSynchronization_flag = true;
+        }
+        if ((irq & InterruptMask::TransceiverError) != 0) {
+            // Transceiver Error handling
+            TransceiverError_flag = true;
+        }
+        if ((irq & InterruptMask::BatteryLow) != 0) {
+            // Battery Low handling
+            BatteryLow_flag = true;
+        }
+        if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
+            EnergyDetectionCompletion_flag = true;
+            // Reenable baseband Core after cca procedure
+            if (basebandCoreConfig.baseBandEnable09) {
+                uint8_t bbcpc = spi_read_8(BBC0_PC, err);
+                spi_write_8(BBC0_PC,(bbcpc & 0xFB) | 0x4, err);
+            }
+
+            energy_measurement09 = get_receiver_energy_detection(Transceiver::RF09, err);
+            transceiverOccupied09 = false;
+            xSemaphoreGive(energyDetCompletion09SemaphoreHandle);
+        }
+        if ((irq & InterruptMask::TransceiverReady) != 0) {
+            TransceiverReady_flag = true;
+
+            // set state rx to receive packets or start measuring energy
+            if (userRequest09 == UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT ||
+                userRequest09 == UserRequest::BASEBAND_RX ||
+                userRequest09 == UserRequest::IQ_RX) {
+                set_state_private(Transceiver::RF09, State::RF_RX, err);
+            }
+
+            // Disable baseband core if there is a cca procedure and initialize the
+            // single shot measurement.
+            if (userRequest09 == UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT) {
+                transceiverOccupied09 = true;
+                uint8_t bbcpc = spi_read_8(BBC0_PC,err);
+                spi_write_8(BBC0_PC,bbcpc & 0xFB,err);
+                spi_write_8(RF09_EDC, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE), err);
+            }
+
+            if (userRequest09 == UserRequest::BASEBAND_TX) {
+                transceiverOccupied09 = true;
+                set_state_private(Transceiver::RF09, State::RF_TX, err);
+            }
+
+            // No need to set the state to TX. This is performed automatically when I_DATA[0] == 1
+            if (userRequest09 == UserRequest::IQ_EEC_TX) {
+                transceiverOccupied09 = true;
+            }
+        }
+        if ((irq & InterruptMask::Wakeup) != 0) {
+            Wakeup_flag = true;
+            // Wakeup handling
+        }
+
+        /// Baseband IRQ
+        irq = spi_read_8(RegisterAddress::BBC0_IRQS, err);
+        if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
+            // Frame Buffer Level Indication handling
+            FrameBufferLevelIndication_flag = true;
+        }
+        if ((irq & InterruptMask::AGCRelease) != 0) {
+            // AGC Release handling
+            AGCRelease_flag = true;
+        }
+        if ((irq & InterruptMask::AGCHold) != 0) {
+            // AGC Hold handling
+            AGCHold_flag = true;
+            // xTaskNotifyFromISR(rf_rxtask->taskHandle, AGC_HOLD, eSetBits, &xHigherPriorityTaskWoken);
+        }
+        if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
+            TransmitterFrameEnd_flag = true;
+            transceiverOccupied09 = false;
+
+            // notify packetTransmissionBaseband() about successful transmission
+            xSemaphoreGive(basebandTx09SemaphoreHandle);
+        }
+        if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
+            // Receiver Extended Match handling
+            ReceiverExtendMatch_flag = true;
+        }
+        if ((irq & InterruptMask::ReceiverAddressMatch) != 0) {
+            // Receiver Address Match handling
+            ReceiverAddressMatch_flag = true;
+        }
+        if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
+            ReceiverFrameEnd_flag = true;
+            RegisterAddress regrxflh = BBC0_RXFLH;
+            RegisterAddress regrxfll = BBC0_RXFLL;
+            RegisterAddress regfbrxs = BBC0_FBRXS;
+            received_packet_length09 = (spi_read_8(regrxflh, err) << 8) | static_cast<uint16_t>(spi_read_8(regrxfll, err));
+            spi_block_read_8(regfbrxs, received_packet_length09, destBuffer09, err);
+            transceiverOccupied09 = false;
+
+            // notify packetReceptionBaseband()
+            xSemaphoreGive(basebandRx09SemaphoreHandle);
+        }
+        if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
+            ReceiverFrameStart_flag = true;
+            transceiverOccupied09 = true;
+        }
+
+        /* 2.4 GHz Transceiver */
+
+        // Radio IRQ
+        irq = spi_read_8(RegisterAddress::RF24_IRQS, err);
+
+        if ((irq & InterruptMask::IFSynchronization) != 0) {
+            // I/Q IF Synchronization Failure handling
+            IFSynchronization_flag = true;
+        }
+        if ((irq & InterruptMask::TransceiverError) != 0) {
+            // Transceiver Error handling
+            TransceiverError_flag = true;
+        }
+        if ((irq & InterruptMask::BatteryLow) != 0) {
+            BatteryLow_flag = true;
+            // Battery Low handling
+        }
+        if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
+            EnergyDetectionCompletion_flag = true;
+            // Reenable baseband Core after cca procedure
+            if (basebandCoreConfig.baseBandEnable24) {
+                uint8_t bbcpc = spi_read_8(BBC1_PC, err);
+                spi_write_8(BBC1_PC,(bbcpc & 0xFB) | 0x4, err);
+            }
+
+            energy_measurement24 = get_receiver_energy_detection(Transceiver::RF24, err);
+            transceiverOccupied24 = false;
+            xSemaphoreGive(energyDetCompletion24SemaphoreHandle);
+        }
+        if ((irq & InterruptMask::TransceiverReady) != 0) {
+            TransceiverReady_flag = true;
+
+            // set state rx to receive packets or start measuring energy
+            if (userRequest24 == UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT ||
+                userRequest24 == UserRequest::BASEBAND_RX ||
+                userRequest24 == UserRequest::IQ_RX) {
+                set_state_private(Transceiver::RF24, State::RF_RX, err);
+            }
+
+            // Disable baseband core if there is a cca procedure and initialize the
+            // single shot measurement
+            if (userRequest24 == UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT) {
+                transceiverOccupied24 = true;
+                uint8_t bbcpc = spi_read_8(BBC1_PC,err);
+                spi_write_8(BBC1_PC,bbcpc & 0xFB,err);
+                spi_write_8(RF24_EDC, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE), err);
+            }
+
+            if (userRequest24 == UserRequest::BASEBAND_TX) {
+                transceiverOccupied24 = true;
+                set_state_private(Transceiver::RF24, State::RF_TX, err);
+            }
+        }
+        if ((irq & InterruptMask::Wakeup) != 0) {
+            // Wakeup handling
+            Wakeup_flag = true;
+        }
+
+        //Baseband IRQ
+        irq = spi_read_8(RegisterAddress::BBC1_IRQS, err);
+        if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
+            // Frame Buffer Level Indication handling
+            FrameBufferLevelIndication_flag = true;
+        }
+        if ((irq & InterruptMask::AGCRelease) != 0) {
+            // AGC Release handling
+            AGCRelease_flag = true;
+        }
+        if ((irq & InterruptMask::AGCHold) != 0) {
+            AGCHold_flag = true;
+        }
+        if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
+            TransmitterFrameEnd_flag = true;
+            transceiverOccupied24 = false;
+
+            // notify packetTransmissionBaseband() about successful transmission
+            xSemaphoreGive(basebandTx24SemaphoreHandle);
+        }
+        if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
+            // Receiver Extended Match handling
+            ReceiverExtendMatch_flag = true;
+        }
+        if ((irq & InterruptMask::ReceiverAddressMatch) != 0) {
+            // Receiver Address Match handling
+            ReceiverAddressMatch_flag = true;
+        }
+        if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
+            ReceiverFrameEnd_flag = true;
+            RegisterAddress regrxflh = BBC1_RXFLH;
+            RegisterAddress regrxfll = BBC1_RXFLL;
+            RegisterAddress regfbrxs = BBC1_FBRXS;
+            received_packet_length24 = (spi_read_8(regrxflh, err) << 8) | static_cast<uint16_t>(spi_read_8(regrxfll, err));
+            spi_block_read_8(regfbrxs, received_packet_length24, destBuffer24, err);
+            transceiverOccupied24 = false;
+
+            // notify packetReceptionBaseband()
+            xSemaphoreGive(basebandRx24SemaphoreHandle);
+        }
+        if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
+            ReceiverFrameStart_flag = true;
+            transceiverOccupied24 = true;
+        }
+
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    /** =========== Private functions  =========== **/
 
     void At86rf215_Utilities::spi_write_8(uint16_t address, uint8_t value, Error& err) {
         uint8_t msg[3] = {static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF), value};
 
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
-        uint8_t hal_error = HAL_SPI_Transmit(hspi, msg, 3, TIMEOUT);
+        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
+        uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, msg, 3);
 
-        if (hal_error != HAL_OK) {
+        if (hal_error != HAL_OK ||
+            xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
             err = Error::FAILED_WRITING_TO_REGISTER;
             return;
         }
@@ -21,11 +756,11 @@ namespace AT86RF215 {
     uint8_t At86rf215_Utilities::spi_read_8(uint16_t address, Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>((address >> 8) & 0x7F), static_cast<uint8_t>(address & 0xFF)};
         uint8_t response[3];
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
-        uint8_t hal_error = HAL_SPI_TransmitReceive(hspi, msg, response, 3,
-                                                    TIMEOUT);
+        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
+        uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, 3);
 
-        if (hal_error != HAL_OK) {
+        if (hal_error != HAL_OK ||
+            xSemaphoreTake(spiReadCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
             err = Error::FAILED_READING_FROM_REGISTER;
             return 0;
         }
@@ -39,14 +774,15 @@ namespace AT86RF215 {
     void At86rf215_Utilities::spi_block_write_8(uint16_t address, uint16_t n, uint8_t* value,
                                       Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF)};
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
-        uint8_t hal_error = HAL_SPI_Transmit(hspi, msg, 2, TIMEOUT);
-        hal_error = HAL_SPI_Transmit(hspi, value, n, TIMEOUT);
+        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
+        uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, value, n);
 
-        if (hal_error != HAL_OK) {
+        if (hal_error != HAL_OK ||
+            xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
             err = Error::FAILED_WRITING_TO_REGISTER;
             return;
         }
+
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
 
         err = Error::NO_ERRORS;
@@ -56,11 +792,11 @@ namespace AT86RF215 {
                                          uint8_t* response, Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>((address >> 8) & 0x7F), static_cast<uint8_t>(address & 0xFF)};
 
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
-        uint8_t hal_error = HAL_SPI_TransmitReceive(hspi, msg, response, n + 2,
-                                                    TIMEOUT);
+        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
+        uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, n + 2);
 
-        if (hal_error != HAL_OK) {
+        if (hal_error != HAL_OK ||
+            xSemaphoreTake(spiReadCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
             err = Error::FAILED_READING_FROM_REGISTER;
             return response;
         }
@@ -70,8 +806,7 @@ namespace AT86RF215 {
         return response + 2;
     }
 
-
-    State At86rf215_Utilities::get_state(Transceiver transceiver, Error& err) {
+    State At86rf215_Utilities::get_state_private(Transceiver transceiver, Error& err) {
         uint8_t state;
         if (transceiver == RF09) {
             state = spi_read_8(RF09_STATE, err) & 0x07;
@@ -92,9 +827,9 @@ namespace AT86RF215 {
         }
     }
 
-    void At86rf215_Utilities::set_state(Transceiver transceiver, State state_cmd,
+    void At86rf215_Utilities::set_state_private(Transceiver transceiver, State state_cmd,
                               Error& err) {
-        State state = get_state(transceiver, err);
+        State state = get_state_private(transceiver, err);
         if (err != Error::NO_ERRORS) {
             return;
         }
@@ -137,20 +872,6 @@ namespace AT86RF215 {
         } else { // transceiver == RF24
             spi_write_8(RF24_CMD, static_cast<uint8_t>(state_cmd), err);
         }
-    }
-
-    void At86rf215_Utilities::chip_reset(Error& error) {
-        // Chip reset
-        spi_write_8(RegisterAddress::RF_RST, 0x07, error);
-
-        // Reset IRQ status registers
-        spi_read_8(RegisterAddress::RF09_IRQS, error);
-        spi_read_8(RegisterAddress::RF24_IRQS, error);
-        spi_read_8(RegisterAddress::BBC0_IRQS, error);
-        spi_read_8(RegisterAddress::BBC1_IRQS, error);
-
-        // Restores the current config settings
-        setup(error);
     }
 
     void At86rf215_Utilities::set_pll_channel_spacing(Transceiver transceiver,
@@ -279,7 +1000,7 @@ namespace AT86RF215 {
 
     void At86rf215_Utilities::configure_pll(Transceiver transceiver, FrequencySynthesizerConfig& frequencySynthesizerConfig, Error& err) {
 
-        if (get_state(transceiver, err) != State::RF_TRXOFF) {
+        if (get_state_private(transceiver, err) != State::RF_TRXOFF) {
             err = Error::INVALID_STATE_FOR_OPERATION;
             return;
         }
@@ -605,124 +1326,6 @@ namespace AT86RF215 {
         return reg;
     }
 
-    // TODO: Upon reaching RX state
-    // wait 8μs + RXDFE.SR + Tu
-    // read rssi
-    void At86rf215_Utilities::packetTransmissionBaseband(Transceiver transceiver,
-                                               uint8_t* packet, uint16_t length, Error& err) {
-
-        bool& tx_ongoing = (transceiver == RF09) ? tx_ongoing_09 : tx_ongoing_24;
-        bool& rx_ongoing = (transceiver == RF09) ? rx_ongoing_09 : rx_ongoing_24;
-
-        if (tx_ongoing || rx_ongoing) {
-            err = Error::ONGOING_TRANSMISSION_RECEPTION;
-            return;
-        }
-
-        set_state(transceiver, State::RF_TRXOFF, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
-
-        RegisterAddress regtxflh;
-        RegisterAddress regtxfll;
-        RegisterAddress regfbtxs;
-
-        if (transceiver == RF09) {
-            regtxflh = BBC0_TXFLH;
-            regtxfll = BBC0_TXFLL;
-            regfbtxs = BBC0_FBTXS;
-        } else { // transceiver == RF24
-            regtxflh = BBC1_TXFLH;
-            regtxfll = BBC1_TXFLL;
-            regfbtxs = BBC1_FBTXS;
-        }
-
-        // write length to register
-        spi_write_8(regtxfll, length & 0xFF, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
-        spi_write_8(regtxflh, (length >> 8) & 0x07, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
-
-        // write to tx frame buffer
-        spi_block_write_8(regfbtxs, length, packet, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
-
-        tx_ongoing = true;
-        set_state(transceiver, State::RF_TXPREP, err);
-    }
-
-    void At86rf215_Utilities::clear_channel_assessment(Transceiver transceiver, Error& err) {
-        bool& tx_ongoing = (transceiver == RF09) ? tx_ongoing_09 : tx_ongoing_24;
-        bool& rx_ongoing = (transceiver == RF09) ? rx_ongoing_09 : rx_ongoing_24;
-
-        if (tx_ongoing or rx_ongoing) {
-            err = Error::ONGOING_TRANSMISSION_RECEPTION;
-        }
-        set_state(transceiver, State::RF_TRXOFF, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
-
-        rx_ongoing = true;
-        if (transceiver == RF09) {
-            cca_ongoing_09 = true;
-        } else
-        {
-            cca_ongoing_24 = true;
-        }
-        set_state(transceiver, State::RF_TXPREP, err);
-    }
-
-    void At86rf215_Utilities::prepareForPacketReceptionBaseband(Transceiver transceiver, Error &err) {
-        set_state(transceiver, State::RF_TRXOFF, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
-
-        if (transceiver == RF09) {
-            rx_ongoing_09 = true;
-        } else
-        {
-            rx_ongoing_24 = true;
-        }
-        set_state(transceiver, State::RF_TXPREP, err);
-    }
-
-    void At86rf215_Utilities::packetReceptionBaseband(Transceiver transceiver, Error& err) {
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
-
-        RegisterAddress regrxflh;
-        RegisterAddress regrxfll;
-        RegisterAddress regfbrxs;
-
-        if (transceiver == RF09) {
-            regrxflh = BBC0_RXFLH;
-            regrxfll = BBC0_RXFLL;
-            regfbrxs = BBC0_FBRXS;
-        } else { // transceiver == RF24
-            regrxflh = BBC1_RXFLH;
-            regrxfll = BBC1_RXFLL;
-            regfbrxs = BBC1_FBRXS;
-        }
-
-        // read length
-        received_packet_length = (spi_read_8(regrxflh, err) << 8) | static_cast<uint16_t>(spi_read_8(regrxfll, err));
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
-
-        spi_block_read_8(regfbrxs, received_packet_length, received_packet, err);
-    }
-
     void At86rf215_Utilities::set_battery_monitor_control(BatteryMonitorHighRange range, BatteryMonitorVoltageThreshold threshold, Error& err) {
         if (err != Error::NO_ERRORS) {
             return;
@@ -1005,7 +1608,6 @@ namespace AT86RF215 {
                     err);
     }
 
-
     void At86rf215_Utilities::setup_irq_mask(Transceiver transceiver, bool iqIfSynchronizationFailure, bool transceiverError,
                                    bool batteryLow, bool energyDetectionCompletion, bool transceiverReady, bool wakeup,
                                    bool frameBufferLevelIndication, bool agcRelease, bool agcHold,
@@ -1030,7 +1632,7 @@ namespace AT86RF215 {
 
     void At86rf215_Utilities::setup(Error& err) {
         // Check state of RF09 core
-        State state = get_state(Transceiver::RF09, err);
+        State state = get_state_private(Transceiver::RF09, err);
         if (err != Error::NO_ERRORS) {
             return;
         }
@@ -1040,7 +1642,7 @@ namespace AT86RF215 {
             return;
         }
         // Check state of RF24 core - we only proceed with the set-up if both cores are in the TRXOFF state to avoid setting half the registers
-        state = get_state(Transceiver::RF24, err);
+        state = get_state_private(Transceiver::RF24, err);
         if (err != Error::NO_ERRORS) {
             return;
         }
@@ -1238,15 +1840,6 @@ namespace AT86RF215 {
             return spi_read_8(RF24_IRQS, err);
         }
         return 0;
-    }
-
-    etl::expected<void, Error> At86rf215_Utilities::check_transceiver_connection(Error& err) {
-        const DevicePartNumber dpn = get_part_number(err);
-        if (err == Error::NO_ERRORS && dpn == DevicePartNumber::AT86RF215) {
-            return {}; /// success
-        } else {
-            return etl::unexpected<Error>(err);
-        }
     }
 
     void At86rf215_Utilities::set_bbc_fskc0_config(Transceiver transceiver,
@@ -1459,295 +2052,6 @@ namespace AT86RF215 {
         // Combine the bytes to form the received length
         uint16_t received_length = (static_cast<uint16_t>(high_length_byte) << 8) | low_length_byte;
         return received_length;
-    }
-
-    void At86rf215_Utilities::print_state(Transceiver transceiver, Error& err) {
-        switch (State rf_state = get_state(transceiver, err)) {
-            case State::RF_NOP:
-                LOG_DEBUG << "STATE: NOP";
-                break;
-            case State::RF_SLEEP:
-                LOG_DEBUG << "STATE: SLEEP";
-                break;
-            case State::RF_TRXOFF:
-                LOG_DEBUG << "STATE: TRXOFF";
-                break;
-            case State::RF_TX:
-                LOG_DEBUG << "STATE: TX";
-                break;
-            case State::RF_RX:
-                LOG_DEBUG << "STATE: RX";
-                break;
-            case State::RF_TRANSITION:
-                LOG_DEBUG << "STATE: TRANSITION";
-                break;
-            case State::RF_RESET:
-                LOG_DEBUG << "STATE: RESET";
-                break;
-            case State::RF_INVALID:
-                LOG_DEBUG << "STATE: INVALID";
-                break;
-            case State::RF_TXPREP:
-                LOG_DEBUG << "STATE: TXPREP";
-                break;
-            default:
-                LOG_ERROR << "UNDEFINED";
-                break;
-        }
-    }
-
-    void At86rf215_Utilities::print_error(Error& err) {
-        if (err == Error::NO_ERRORS)
-            return;
-        switch (err) {
-            case Error::FAILED_WRITING_TO_REGISTER:
-                LOG_ERROR << "FAILED_WRITING_TO_REGISTER";
-                break;
-
-            case Error::FAILED_READING_FROM_REGISTER:
-                LOG_ERROR << "FAILED_READING_FROM_REGISTER";
-                break;
-
-            case Error::FAILED_CHANGING_STATE:
-                LOG_ERROR << "FAILED_CHANGING_STATE";
-                break;
-
-            case Error::UKNOWN_REQUESTED_STATE:
-                LOG_ERROR << "UNKNOWN_REQUESTED_STATE";
-                break;
-
-            case Error::UKNOWN_PART_NUMBER:
-                LOG_ERROR << "UNKNOWN_PART_NUMBER";
-                break;
-
-            case Error::INVALID_TRANSCEIVER_FREQ:
-                LOG_ERROR << "INVALID_TRANSCEIVER_FREQ";
-                break;
-
-            case Error::INVALID_STATE_FOR_OPERATION:
-                LOG_ERROR << "INVALID_STATE_FOR_OPERATION";
-                break;
-
-            case Error::INVALID_PLL_CENTER_FREQ:
-                LOG_ERROR << "INVALID_PLL_CENTER_FREQ";
-                break;
-
-            case Error::UKNOWN_DEVICE_PART_NUMBER:
-                LOG_ERROR << "UNKNOWN_DEVICE_PART_NUMBER";
-                break;
-
-            case Error::INVALID_RSSI_MEASUREMENT:
-                LOG_ERROR << "INVALID_RSSI_MEASUREMENT";
-                break;
-
-            case Error::INVALID_AGC_CONTROl_WORD:
-                LOG_ERROR << "INVALID_AGC_CONTROl_WORD";
-                break;
-
-            case Error::ONGOING_TRANSMISSION_RECEPTION:
-                LOG_ERROR << "ONGOING_TRANSMISSION_RECEPTION";
-                break;
-
-            default:
-                LOG_ERROR << "UNHANDLED_ERROR";
-                break;
-        }
-    }
-
-    void At86rf215_Utilities::handle_irq() {
-        Error err = Error::NO_ERRORS;
-       // BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        /* Sub 1-GHz Transceiver */
-
-        // Radio IRQ
-        volatile uint8_t irq = spi_read_8(RegisterAddress::RF09_IRQS, err);
-        if ((irq & InterruptMask::IFSynchronization) != 0) {
-            // I/Q IF Synchronization Failure handling
-            IFSynchronization_flag = true;
-        }
-        if ((irq & InterruptMask::TransceiverError) != 0) {
-            // Transceiver Error handling
-            TransceiverError_flag = true;
-        }
-        if ((irq & InterruptMask::BatteryLow) != 0) {
-            // Battery Low handling
-            BatteryLow_flag = true;
-        }
-        if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
-            EnergyDetectionCompletion_flag = true;
-            // Reenable baseband Core after cca procedure
-            uint8_t bbcpc = spi_read_8(BBC0_PC, err);
-            spi_write_8(BBC0_PC,(bbcpc & 0xFB) | 0x4, err);
-            rx_ongoing_09 = false;
-            cca_ongoing_09 = false;
-
-            energy_measurement = get_receiver_energy_detection(Transceiver::RF09, err);
-            set_state(Transceiver::RF09, State::RF_TRXOFF, err);
-        }
-        if ((irq & InterruptMask::TransceiverReady) != 0) {
-            TransceiverReady_flag = true;
-            if (rx_ongoing_09) {
-                // Disable baseband core if there is a cca procedure
-                if (cca_ongoing_09){
-                    uint8_t bbcpc = spi_read_8(BBC0_PC,err);
-                    spi_write_8(BBC0_PC,bbcpc & 0xFB,err);
-                }
-                // Switch to RX state once the transceiver is ready to receive
-                set_state(Transceiver::RF09, State::RF_RX, err);
-
-                // Initialize single-shot measurement
-                if (cca_ongoing_09) {
-                    spi_write_8(RF09_EDC, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE), err);
-                }
-            }
-
-            if (tx_ongoing_09){
-                // Switch to TX state once the transceiver is ready to send
-                set_state(Transceiver::RF09, State::RF_TX, err);
-            }
-        }
-        if ((irq & InterruptMask::Wakeup) != 0) {
-            Wakeup_flag = true;
-            // Wakeup handling
-        }
-
-        /// Baseband IRQ
-        irq = spi_read_8(RegisterAddress::BBC0_IRQS, err);
-        if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
-            // Frame Buffer Level Indication handling
-            FrameBufferLevelIndication_flag = true;
-        }
-        if ((irq & InterruptMask::AGCRelease) != 0) {
-            // AGC Release handling
-            AGCRelease_flag = true;
-        }
-        if ((irq & InterruptMask::AGCHold) != 0) {
-            // AGC Hold handling
-            AGCHold_flag = true;
-            // xTaskNotifyFromISR(rf_rxtask->taskHandle, AGC_HOLD, eSetBits, &xHigherPriorityTaskWoken);
-        }
-        if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
-            TransmitterFrameEnd_flag = true;
-            tx_ongoing_09 = false;
-            set_state(Transceiver::RF09, State::RF_TRXOFF, err);
-        }
-        if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
-            // Receiver Extended Match handling
-            ReceiverExtendMatch_flag = true;
-        }
-        if ((irq & InterruptMask::ReceiverAddressMatch) != 0) {
-            // Receiver Address Match handling
-            ReceiverAddressMatch_flag = true;
-        }
-        if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
-            ReceiverFrameEnd_flag = true;
-            // @TODO experiment with freertos based notifications
-//            xTaskNotifyFromISR(rf_rxtask->taskHandle, RECEIVE_FRAME_END, eSetBits, &xHigherPriorityTaskWoken);
-//            if (rx_ongoing) {
-//                rx_ongoing = false;
-//            }
-            if (rx_ongoing_09){
-                packetReceptionBaseband(Transceiver::RF09, err);
-                rx_ongoing_09 = false;
-            }
-            set_state(Transceiver::RF09, State::RF_TRXOFF, err);
-        }
-        if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
-            ReceiverFrameStart_flag = true;
-        }
-
-        /* 2.4 GHz Transceiver */
-
-        // Radio IRQ
-        irq = spi_read_8(RegisterAddress::RF24_IRQS, err);
-
-        if ((irq & InterruptMask::IFSynchronization) != 0) {
-            // I/Q IF Synchronization Failure handling
-            IFSynchronization_flag = true;
-        }
-        if ((irq & InterruptMask::TransceiverError) != 0) {
-            // Transceiver Error handling
-            TransceiverError_flag = true;
-        }
-        if ((irq & InterruptMask::BatteryLow) != 0) {
-            BatteryLow_flag = true;
-            // Battery Low handling
-        }
-        if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
-            EnergyDetectionCompletion_flag = true;
-            // Reenable baseband Core after cca procedure
-            uint8_t bbcpc = spi_read_8(BBC1_PC,err);
-            spi_write_8(BBC1_PC,(bbcpc & 0xFB) | 0x4,err);
-            rx_ongoing_24 = false;
-            cca_ongoing_24 = false;
-
-            energy_measurement = get_receiver_energy_detection(Transceiver::RF24, err);
-            set_state(Transceiver::RF24, State::RF_TRXOFF, err);
-        }
-        if ((irq & InterruptMask::TransceiverReady) != 0) {
-            TransceiverReady_flag = true;
-            if (rx_ongoing_24) {
-                // Disable baseband core if there is a cca procedure
-                if (cca_ongoing_24){
-                    uint8_t bbcpc = spi_read_8(BBC1_PC,err);
-                    spi_write_8(BBC1_PC,bbcpc & 0xFB,err);
-                }
-                // Switch to RX state once the transceiver is ready to receive
-                set_state(Transceiver::RF24, State::RF_RX, err);
-
-                // Initialize measurement
-                if (cca_ongoing_24) {
-                    spi_write_8(RF24_EDC, static_cast<uint8_t >(EnergyDetectionMode::RF_EDSINGLE), err);
-                }
-            }
-            if (tx_ongoing_24){
-                // Switch to TX state once the transceiver is ready to send
-                set_state(Transceiver::RF24, State::RF_TX, err);
-            }
-        }
-        if ((irq & InterruptMask::Wakeup) != 0) {
-            // Wakeup handling
-            Wakeup_flag = true;
-        }
-
-        //Baseband IRQ
-        irq = spi_read_8(RegisterAddress::BBC1_IRQS, err);
-        if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
-            // Frame Buffer Level Indication handling
-            FrameBufferLevelIndication_flag = true;
-        }
-        if ((irq & InterruptMask::AGCRelease) != 0) {
-            // AGC Release handling
-            AGCRelease_flag = true;
-        }
-        if ((irq & InterruptMask::AGCHold) != 0) {
-            AGCHold_flag = true;
-        }
-        if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
-            TransmitterFrameEnd_flag = true;
-            tx_ongoing_24 = false;
-            set_state(Transceiver::RF24, State::RF_TRXOFF, err);
-        }
-        if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
-            // Receiver Extended Match handling
-            ReceiverExtendMatch_flag = true;
-        }
-        if ((irq & InterruptMask::ReceiverAddressMatch) != 0) {
-            // Receiver Address Match handling
-            ReceiverAddressMatch_flag = true;
-        }
-        if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
-            ReceiverFrameEnd_flag = true;
-            if (rx_ongoing_24) {
-                packetReceptionBaseband(Transceiver::RF24, err);
-                rx_ongoing_24 = false;
-            }
-            set_state(Transceiver::RF24, State::RF_TRXOFF, err);
-        }
-        if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
-            // Receiver Frame Start handling
-            ReceiverFrameStart_flag = true;
-        }
     }
 
     At86rf215_Utilities transceiverUtils = At86rf215_Utilities();
