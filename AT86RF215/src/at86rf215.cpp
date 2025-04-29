@@ -1,7 +1,79 @@
 #include "at86rf215.hpp"
+
+#include <map>
+#include <etl/flat_map.h>
+
 #include "Task.hpp"
 
 namespace AT86RF215 {
+static constexpr MorseCodeMapping getMorse(char c) {
+    switch (c) {
+        // Letters (uppercase + lowercase)
+        case 'A': case 'a': return { 0b01000000, 2 };  // .-
+        case 'B': case 'b': return { 0b10000000, 4 };  // -...
+        case 'C': case 'c': return { 0b10100000, 4 };  // -.-.
+        case 'D': case 'd': return { 0b10000000, 3 };  // -..
+        case 'E': case 'e': return { 0b00000000, 1 };  // .
+        case 'F': case 'f': return { 0b00100000, 4 };  // ..-.
+        case 'G': case 'g': return { 0b11000000, 3 };  // --.
+        case 'H': case 'h': return { 0b00000000, 4 };  // ....
+        case 'I': case 'i': return { 0b00000000, 2 };  // ..
+        case 'J': case 'j': return { 0b01110000, 4 };  // .---
+        case 'K': case 'k': return { 0b10100000, 3 };  // -.-
+        case 'L': case 'l': return { 0b01000000, 4 };  // .-..
+        case 'M': case 'm': return { 0b11000000, 2 };  // --
+        case 'N': case 'n': return { 0b10000000, 2 };  // -.
+        case 'O': case 'o': return { 0b11100000, 3 };  // ---
+        case 'P': case 'p': return { 0b01100000, 4 };  // .--.
+        case 'Q': case 'q': return { 0b11010000, 4 };  // --.-
+        case 'R': case 'r': return { 0b01000000, 3 };  // .-.
+        case 'S': case 's': return { 0b00000000, 3 };  // ...
+        case 'T': case 't': return { 0b10000000, 1 };  // -
+        case 'U': case 'u': return { 0b00100000, 3 };  // ..-
+        case 'V': case 'v': return { 0b00010000, 4 };  // ...-
+        case 'W': case 'w': return { 0b01100000, 3 };  // .--
+        case 'X': case 'x': return { 0b10010000, 4 };  // -..-
+        case 'Y': case 'y': return { 0b10110000, 4 };  // -.--
+        case 'Z': case 'z': return { 0b11000000, 4 };  // --..
+
+        // Digits
+        case '0': return { 0b11111000, 5 };
+        case '1': return { 0b01111000, 5 };
+        case '2': return { 0b00111000, 5 };
+        case '3': return { 0b00011000, 5 };
+        case '4': return { 0b00001000, 5 };
+        case '5': return { 0b00000000, 5 };
+        case '6': return { 0b10000000, 5 };
+        case '7': return { 0b11000000, 5 };
+        case '8': return { 0b11100000, 5 };
+        case '9': return { 0b11110000, 5 };
+
+        // Punctuation (including comma!)
+        case '.': return { 0b01010100, 6 };  // .-.-.-
+        case ',': return { 0b11001100, 6 };  // --..--
+        case '?': return { 0b00110000, 6 };  // ..--..
+        case '\'': return { 0b01111000, 6 };  // .----.
+        case '!': return { 0b10101100, 6 };  // -.-.--
+        case '/': return { 0b10010000, 5 };   // -..-.
+        case '(': return { 0b10110000, 5 };   // -.--.
+        case ')': return { 0b10110100, 6 };   // -.--.-
+        case '&': return { 0b01000000, 5 };   // .-...
+        case ':': return { 0b11100000, 6 };   // ---...
+        case ';': return { 0b10101000, 6 };   // -.-.-.
+        case '=': return { 0b10001000, 5 };   // -...-
+        case '+': return { 0b01010000, 5 };   // .-.-.
+        case '-': return { 0b10000100, 6 };   // -....-
+        case '_': return { 0b00110100, 6 };   // ..--.-
+        case '"': return { 0b01001000, 6 };   // .-..-.
+        case '$': return { 0b00010010, 8 };   // ...-..-
+        case '@': return { 0b01101000, 6 };   // .--.-.
+
+        default:
+            return { 0, 0 };  // not found
+    }
+}
+
+
     /** =========== Driver's public interface  =========== **/
 
     State At86rf215_Utilities::get_state(Transceiver transceiver, Error& err) {
@@ -398,6 +470,102 @@ namespace AT86RF215 {
             transceiverOccupied24 = false;
         }
 
+        xSemaphoreGive(resourcesMutexHandle);
+    }
+
+    void At86rf215_Utilities::transmitMorseCode(Transceiver transceiver, Error& err, float wpm, const char* sequence, uint16_t sequenceLen) {
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
+        bool& transceiverOccupied = transceiver == RF09 ? transceiverOccupied09 : transceiverOccupied24;
+
+        if (transceiverOccupied) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            xSemaphoreGive(resourcesMutexHandle);
+            return;
+        }
+
+        // setup transceiver as shown in table 13-2 (middle column)
+        RegisterAddress iqfc1_reg = RF_IQIFC1;
+        RegisterAddress pc_reg;
+        RegisterAddress txfhl_reg;
+        RegisterAddress txfll_reg;
+        RegisterAddress txdaci_reg;
+        RegisterAddress txdacq_reg;
+
+        if (transceiver == RF09) {
+            pc_reg = BBC0_PC;
+            txfhl_reg = BBC0_TXFLH;
+            txfll_reg = BBC0_TXFLL;
+            txdaci_reg = RF09_TXDACI;
+            txdacq_reg = RF09_TXDACQ;
+        } else {
+            pc_reg = BBC1_PC;
+            txfhl_reg = BBC1_TXFLH;
+            txfll_reg = BBC1_TXFLL;
+            txdaci_reg = RF24_TXDACI;
+            txdacq_reg = RF24_TXDACQ;
+        }
+
+        const uint8_t iqfc1_val = spi_read_8(iqfc1_reg, err);
+        const uint8_t pc_val = spi_read_8(pc_reg, err);
+        const uint8_t txfhl_val = spi_read_8(txfhl_reg, err);
+        const uint8_t txfll_val = spi_read_8(txfll_reg, err);
+
+        set_state_private(transceiver, State::RF_TRXOFF, err);
+        spi_write_8(iqfc1_reg, iqfc1_val & 0x87, err); // CHPM = 0
+        spi_write_8(pc_reg, pc_val | 0x80, err);       // CTX = 1
+        spi_write_8(txfhl_reg, 0x07, err);             // any length will do
+        spi_write_8(txfll_reg, 0xFF, err);
+        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // enable in-phase DAC overwrite with max amplitude
+        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // enable quadrature-phase DAC overwrite with min amplitude
+        set_state_private(transceiver, State::RF_TXPREP, err);
+
+        const auto timeUnit = static_cast<uint16_t>(1200 / wpm);
+        for (uint16_t i = 0; i < sequenceLen; i++) {
+            if (sequence[i] == ' ') { // large delay for word gaps
+             vTaskDelay(7*pdMS_TO_TICKS(timeUnit));
+             continue;
+            }
+
+            MorseCodeMapping morseCodeMapping = getMorse(sequence[i]);
+            if (morseCodeMapping.dotDashNum == 0) { // skip unknown characters
+                continue;
+            }
+
+            // transmit character
+            for (uint8_t j = 0; j < morseCodeMapping.dotDashNum; j++) {
+                set_state_private(transceiver, State::RF_TX, err);
+                if (morseCodeMapping.dotDashMapping & (0x80 >> j)) { // dot
+                    vTaskDelay(pdMS_TO_TICKS(timeUnit));
+                } else {                                             // dash
+                    vTaskDelay(3*pdMS_TO_TICKS(timeUnit));
+                }
+                set_state_private(transceiver, State::RF_TXPREP, err);
+
+                // delay between character elements
+                if (j != morseCodeMapping.dotDashNum - 1) {
+                    vTaskDelay(pdMS_TO_TICKS(timeUnit));
+                }
+            }
+
+            // Delay between characters (skip if next is a space)
+            if (i != sequenceLen - 1 && sequence[i + 1] != ' ') {
+                vTaskDelay(pdMS_TO_TICKS(3 * timeUnit));
+            }
+        }
+
+        // restore original configuration
+        spi_write_8(iqfc1_reg, iqfc1_val, err);
+        spi_write_8(pc_reg, pc_val, err);
+        spi_write_8(txfhl_reg, txfhl_val, err);
+        spi_write_8(txfll_reg, txfll_val, err);
+        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // disable in-phase DAC overwrite
+        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // disable quadrature-phase DAC overwrite
+
+        err = Error::NO_ERRORS;
         xSemaphoreGive(resourcesMutexHandle);
     }
 

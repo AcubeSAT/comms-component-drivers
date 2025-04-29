@@ -11,7 +11,15 @@
 #include "at86rf215config.hpp"
 
 typedef struct __SPI_HandleTypeDef SPI_HandleTypeDef;
+
 namespace AT86RF215 {
+    typedef struct {
+        uint8_t dotDashMapping;  // 0bXX represents the dot-dash mapping (e.g., 0b01 for dot-dash)
+        uint8_t dotDashNum;      // The number of symbols in the Morse code
+    } MorseCodeMapping;
+
+    static constexpr MorseCodeMapping getMorse(char c);
+
     enum class Error {
         NO_ERRORS,
         FAILED_WRITING_TO_REGISTER,
@@ -300,6 +308,24 @@ namespace AT86RF215 {
          *      packet, so that the AGC is released and the transceiverOccupied flag is reset
          */
         void waitForPacketReceptionIQ(Transceiver transceiver, Error& err);
+
+        /**
+         * Transmit a sequence of characters encoded as morse code, with on-off keying modulation (OOK).
+         * This is achieved using the "DAC overwrite"  features (section 13.1.2), which allows transmission
+         * of a pure LO carrier.
+         * @note Ensure IQIFC1.CHPM = 0 and PC.CTX = 1.
+         * @param wpm Words per minute. This function cannot handle sub millisecond (or close to millisecond)
+         *            symbol durations. Enter a reasonable value, that is well below 1200 words per minute.
+         *
+         * @details
+         * 1 time unit : 1200/wpm milliseconds
+         * dot duration: 1 time unit
+         * dash duration: 3 time units
+         * duration between elements of the same character: 1 time unit
+         * duration between characters: 3 time units
+         * duration between words: 7 time units
+         */
+        void transmitMorseCode(Transceiver transceiver, Error& err, float wpm, const char* sequence, uint16_t sequenceLen);
 
     private:
         /// Mutex for concurrent access protection
