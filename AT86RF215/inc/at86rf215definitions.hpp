@@ -836,4 +836,6 @@ namespace AT86RF215 {
         BBC1_CNT3 = 0x494,
     };
 
+    inline constexpr uint16_t MaxBasebandCorePacketLength = 2047;
+    inline constexpr uint16_t SpiTimeout = 1000;  // in ms
 } // namespace AT86RF215

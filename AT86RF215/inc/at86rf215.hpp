@@ -10,10 +10,16 @@
 #include "at86rf215definitions.hpp"
 #include "at86rf215config.hpp"
 
-constexpr uint16_t TIMEOUT = 1000;
 typedef struct __SPI_HandleTypeDef SPI_HandleTypeDef;
 
 namespace AT86RF215 {
+    typedef struct {
+        uint8_t dotDashMapping;  // 0bXX represents the dot-dash mapping (e.g., 0b01 for dot-dash)
+        uint8_t dotDashNum;      // The number of symbols in the Morse code
+    } MorseCodeMapping;
+
+    static constexpr MorseCodeMapping getMorse(char c);
+
     enum class Error {
         NO_ERRORS,
         FAILED_WRITING_TO_REGISTER,
@@ -28,6 +34,10 @@ namespace AT86RF215 {
         INVALID_RSSI_MEASUREMENT,
         INVALID_AGC_CONTROl_WORD,
         ONGOING_TRANSMISSION_RECEPTION,
+        RESOURCE_MUTEX_TIMEOUT,
+        TRANSMISSION_FAILED,
+        RECEPTION_FAILED,
+        SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED,
     };
 
     inline uint8_t operator&(const uint8_t a, InterruptMask b) {
@@ -36,6 +46,327 @@ namespace AT86RF215 {
 
     class At86rf215_Utilities {
     public:
+        /// Flags indicating a radio interrupt has occurred (offered for debugging purposes only, must be manually reset)
+        bool IFSynchronization_flag = false;
+        bool TransceiverError_flag = false;
+        bool EnergyDetectionCompletion_flag = false;
+        bool TransceiverReady_flag  = false;
+        bool Wakeup_flag = false;
+        bool BatteryLow_flag = false;
+
+        /// Flags indicating a baseband core interrupt has occurred (offered for debugging purposes only, must be manually reset)
+        bool FrameBufferLevelIndication_flag = false;
+        bool AGCRelease_flag = false;
+        bool AGCHold_flag = false;
+        bool TransmitterFrameEnd_flag = false;
+        bool ReceiverExtendMatch_flag = false;
+        bool ReceiverAddressMatch_flag = false;
+        bool ReceiverFrameEnd_flag = false;
+        bool ReceiverFrameStart_flag = false;
+
+        /// Binary semaphores for signaling certain events (add them inside the proper ISR or freertos tak)
+        SemaphoreHandle_t spiWriteCompleteSemaphoreHandle;          // completion of spi write from dma callback
+        SemaphoreHandle_t spiReadCompleteSemaphoreHandle;           // completion of spi read from dma callback
+        SemaphoreHandle_t iqEecTransmissionCompleteSemaphoreHandle09; // completion of tx using I/Q interface with embedded control
+        SemaphoreHandle_t iqPreambleReceptionSemaphoreHandle09;       // reception of a preamble using the I/Q interface
+        SemaphoreHandle_t iqPacketReceptionSemaphoreHandle09;         // full reception of a packet using the I/Q interface
+        SemaphoreHandle_t iqEecTransmissionCompleteSemaphoreHandle24; // completion of tx using I/Q interface with embedded control
+        SemaphoreHandle_t iqPreambleReceptionSemaphoreHandle24;       // reception of a preamble using the I/Q interface
+        SemaphoreHandle_t iqPacketReceptionSemaphoreHandle24;         // full reception of a packet using the I/Q interface
+
+        /**
+         * Initializer for AT86RF215 driver
+         */
+        At86rf215_Utilities()
+                : transceiverOccupied09(false), transceiverOccupied24(false),
+                  userRequest09(UserRequest::NO_REQUEST), userRequest24(UserRequest::NO_REQUEST),
+                  energy_measurement09(0), energy_measurement24(0), received_packet_length09(0),
+                  received_packet_length24(0) {
+            // Initialize the mutex and the binary semaphores
+            resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
+            spiWriteCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiWriteCompleteSemaphoreBuffer);
+            spiReadCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiReadCompleteSemaphoreBuffer);
+            basebandTx09SemaphoreHandle = xSemaphoreCreateBinaryStatic(&basebandTx09SemaphoreBuffer);
+            basebandTx24SemaphoreHandle = xSemaphoreCreateBinaryStatic(&basebandTx24SemaphoreBuffer);
+            basebandRx09SemaphoreHandle = xSemaphoreCreateBinaryStatic(&basebandRx09SemaphoreBuffer);
+            basebandRx24SemaphoreHandle = xSemaphoreCreateBinaryStatic(&basebandRx24SemaphoreBuffer);
+            energyDetCompletion09SemaphoreHandle = xSemaphoreCreateBinaryStatic(&energyDetCompletion09SemaphoreBuffer);
+            energyDetCompletion24SemaphoreHandle = xSemaphoreCreateBinaryStatic(&energyDetCompletion24SemaphoreBuffer);
+            iqEecTransmissionCompleteSemaphoreHandle09 = xSemaphoreCreateBinaryStatic(&iqEecTransmissionCompleteSemaphoreBuffer09);
+            iqPreambleReceptionSemaphoreHandle09 = xSemaphoreCreateBinaryStatic(&iqPreambleReceptionSemaphoreBuffer09);
+            iqPacketReceptionSemaphoreHandle09 = xSemaphoreCreateBinaryStatic(&iqPacketReceptionSemaphoreBuffer09);
+            iqEecTransmissionCompleteSemaphoreHandle24 = xSemaphoreCreateBinaryStatic(&iqEecTransmissionCompleteSemaphoreBuffer24);
+            iqPreambleReceptionSemaphoreHandle24 = xSemaphoreCreateBinaryStatic(&iqPreambleReceptionSemaphoreBuffer24);
+            iqPacketReceptionSemaphoreHandle24 = xSemaphoreCreateBinaryStatic(&iqPacketReceptionSemaphoreBuffer24);
+            if (resourcesMutexHandle == nullptr ||
+                basebandTx09SemaphoreHandle == nullptr ||
+                basebandTx24SemaphoreHandle == nullptr ||
+                basebandRx09SemaphoreHandle == nullptr ||
+                basebandRx24SemaphoreHandle == nullptr ||
+                energyDetCompletion09SemaphoreHandle == nullptr ||
+                energyDetCompletion24SemaphoreHandle == nullptr ||
+                spiWriteCompleteSemaphoreHandle == nullptr ||
+                spiReadCompleteSemaphoreHandle == nullptr ||
+                iqEecTransmissionCompleteSemaphoreHandle09 == nullptr ||
+                iqPreambleReceptionSemaphoreHandle09 == nullptr ||
+                iqPacketReceptionSemaphoreHandle09 == nullptr ||
+                iqEecTransmissionCompleteSemaphoreHandle24 == nullptr ||
+                iqPreambleReceptionSemaphoreHandle24 == nullptr ||
+                iqPacketReceptionSemaphoreHandle24 == nullptr) {
+                LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphores";
+            }
+
+            // Set the default configuration structures
+            setGeneralConfig();
+            setRXConfig();
+            setTXConfig();
+            setBaseBandCoreConfig();
+            setFrequencySynthesizerConfig();
+            setExternalFrontEndControlConfig();
+            setInterruptConfig();
+            setRadioInterruptConfig();
+            setIQInterfaceConfig();
+        }
+
+        /**
+         * Register SPI handle, and setup the transceiver.
+         * @warning The user should always call this before using any of the driver methods.
+         */
+        void registerTransceiver(SPI_HandleTypeDef* handle, Error err = Error::NO_ERRORS) {
+            hspi = handle;
+            setup(err);
+        }
+
+        /**
+         * This method reads the transceiver interrupt code and takes any necessary actions.
+         * It should be used inside a high priority freertos task, dedicated solely to transceiver irq handling.
+         *
+         * @warning This method attempts to take the resources mutex, so it must not be called inside an ISR. Instead,
+         *          the ISR should notify the dedicated irq handling task.
+         */
+        void handle_irq(Error &err);
+
+        /**
+         * Update the configuration structures. For the changes to apply, a subsequent call to chip_reset() is
+         * required.
+         */
+        void setGeneralConfig(GeneralConfiguration&& GeneralConfig = GeneralConfiguration::DefaultGeneralConfig()) {
+            generalConfig = std::move(GeneralConfig);
+        }
+        void setRXConfig(RXConfig&& RXConfig = RXConfig::DefaultRXConfig()) {
+            rxConfig = std::move(RXConfig); // Move the new config into rxConfig
+        }
+        void setTXConfig(TXConfig&& TXConfig = TXConfig::DefaultTXConfig()) {
+            txConfig = std::move(TXConfig); // Move the new config into rxConfig
+        }
+        void setBaseBandCoreConfig(BasebandCoreConfig&& BasebandCoreConfig = BasebandCoreConfig::DefaultBasebandCoreConfig()) {
+            basebandCoreConfig = std::move(BasebandCoreConfig); // Move the new config into rxConfig
+        }
+        void setFrequencySynthesizerConfig(FrequencySynthesizerConfig&& FrequencySynthesizer = FrequencySynthesizerConfig::DefaultFrequencySynthesizerConfig()) {
+            freqSynthesizerConfig = std::move(FrequencySynthesizer); // Move the new config into rxConfig
+        }
+        void setExternalFrontEndControlConfig(ExternalFrontEndConfig&& ExternalFrontEndConfig = ExternalFrontEndConfig::DefaultExternalFrontEndConfig()) {
+            externalFrontEndConfig = std::move(ExternalFrontEndConfig);
+        }
+        void setInterruptConfig(BasebandCoreInterruptsConfig&& InterruptsConfig = BasebandCoreInterruptsConfig::DefaultBasebandCoreInterruptsConfig()) {
+            basebandCoreInterruptsConfig = std::move(InterruptsConfig);
+        }
+        void setRadioInterruptConfig(RadioInterruptsConfig&& RadioInterruptsConfig = RadioInterruptsConfig::DefaultRadioInterruptsConfig()) {
+            radioInterruptsConfig = std::move(RadioInterruptsConfig);
+        }
+        void setIQInterfaceConfig(IQInterfaceConfig&& IQInterfaceConfig = IQInterfaceConfig::DefaultIQInterfaceConfig()) {
+            iqInterfaceConfig = std::move(IQInterfaceConfig);
+        }
+
+        /**
+         * Fetches the current state of the transceiver
+         * @note Mutex protected wrapper for get_state_private()
+         *
+         * @param transceiver	Specifies the transceiver used
+         * @param err			Pointer to raised error
+         */
+        State get_state(Transceiver transceiver, Error& err);
+
+        /**
+         * Sets the state of the transceiver
+         * @note Mutex protected wrapper for set_state_private()
+         *
+         * @param transceiver	Specifies the transceiver used
+         * @param state_cmd		Command responsible for changing the state
+         * @param err			Pointer to raised error
+         */
+        void set_state(Transceiver transceiver, State state_cmd, Error& err);
+
+        /**
+         * Does chip reset and reads from the interrupt status registers via SPI, resetting them.
+         * It also restores the config settings
+         * @param error		Pointer to raised error
+         */
+        void chip_reset(Error& error);
+
+        /**
+         * Try to read something from the transceiver to ensure the spi connection works
+         */
+        etl::expected<void, Error> check_transceiver_connection(Error& err);
+
+        /**
+         * Use the logger to print the current state of the transceiver
+         */
+        void print_state(Transceiver transceiver, Error& err);
+
+        /**
+         * Print an error using the logger
+         */
+        void print_error(Error& err);
+
+        /**
+         * Begin operations for measuring energy in the specified bandwidth (single shot measurement)
+         * @param transceiver       Selected transceiver
+         * @param err               Pointer to raised error
+         */
+        // TODO: specify bw here
+        int8_t clear_channel_assessment(Transceiver transceiver, Error& err);
+
+        /**
+         * Transmit a packet using the baseband core.
+         *
+         * @param transceiver		Specifies the transceiver used
+         * @param packet			Pointer to packet data
+         * @param length			Length of packet
+         * @param err				Pointer to raised error
+         *
+         */
+        void packetTransmissionBaseband(Transceiver transceiver, uint8_t* packet,
+                                        uint16_t length, Error& err);
+
+        /**
+         * Set the receiver to a "listening" state, so that packet reception through the
+         * baseband core may be performed.
+         *
+         * @note This function essentially sets the transceiver to state RX, but the user is
+         *       not stopped from performing an energy measurement, or a tx operation (either with
+         *       the baseband core or through the I/Q interface), meaning the
+         *       transceiverOccupied flag is not set until an actual reception occurs.  The function
+         *       has to be called again to re-enter the "listening" state.
+         *
+         *
+         * @param transceiver		Specifies the transceiver used
+         * @param destBuff          A user provided buffer to write the packet. In order to guarantee
+         *                          that there will be no buffer overflow, it's capacity should be
+         *                          at least 2047 (the maximum possible packet length)
+         * @param err				Pointer to raised error
+         */
+        void preparePacketReceptionBaseband(Transceiver transceiver, uint8_t* destBuff, Error &err);
+
+        /**
+         * Waits for packet reception. The packet is written to the registered buffer from
+         * the preparePacketReceptionBaseband() call.
+         *
+         * @note The actual copying of the reception packet happens in handle_irq(), when a receiver frame
+         *       end interrupt arrives. All this function does is wait for a semaphore,
+         *       which is sent when said copying is finished.
+         *
+         * @returns The received packet length
+         */
+        uint16_t waitForPacketReceptionBaseband(Transceiver transceiver, Error &err);
+
+        /**
+         * Set the transceiver to state TX_PREP and set the transceiverOccupied flag, so that
+         * transmission from an external baseband processor may begin.
+         *
+         * @note This function should be called only when embedded control is active. In this mode,
+         *       the transceiver is automatically  set to state TX, by the external baseband processor.
+         *       This is achieved by sending I_DATA[0] == 1 through the I/Q interface (@see figure 7.6 of datasheet).
+         *
+         * @b The user needs to give the iqEecTransmissionCompleteSemaphore immediately after the
+         *    baseband processor finishes the TX operation, so that the transceiver occupied flag is reset.
+         */
+        void packetTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err);
+
+        /**
+         * Set the transceiver to a "listening" state , so that packet reception through the
+         * I/Q interface may be performed.
+         *
+         * @note This function essentially sets the transceiver to state RX, but the user is
+         *       not stopped from performing an energy measurement, or a tx operation (either with
+         *       the baseband core or through the I/Q interface), meaning the
+         *       transceiverOccupied flag is not set until an actual reception occurs. The function
+         *       has to be called again to re-enter the "listening" state.
+         *
+         */
+        void preparePacketReceptionIQ(Transceiver transceiver, Error& err);
+
+        /**
+         * Wait for packet reception through the I/Q interface.
+         *
+         * @note The user needs to take the following actions externally:
+         *    - give the iqPreambleReceptionSemaphore immediately after the external baseband processor
+         *      detects a preamble, so that the transceiver is locked (transceiverOccupied flag set) and the
+         *      AGC frozen.
+         *
+         *    - give the iqPacketReceptionSemaphore once the external baseband processor fully received the
+         *      packet, so that the AGC is released and the transceiverOccupied flag is reset
+         */
+        void waitForPacketReceptionIQ(Transceiver transceiver, Error& err);
+
+        /**
+         * Transmit a sequence of characters encoded as morse code, with on-off keying modulation (OOK).
+         * This is achieved using the "DAC overwrite"  features (section 13.1.2), which allows transmission
+         * of a pure LO carrier.
+         * @note Ensure IQIFC1.CHPM = 0 and PC.CTX = 1.
+         * @param wpm Words per minute. This function cannot handle sub millisecond (or close to millisecond)
+         *            symbol durations. Enter a reasonable value, that is well below 1200 words per minute.
+         *
+         * @details
+         * 1 time unit : 1200/wpm milliseconds
+         * dot duration: 1 time unit
+         * dash duration: 3 time units
+         * duration between elements of the same character: 1 time unit
+         * duration between characters: 3 time units
+         * duration between words: 7 time units
+         */
+        void transmitMorseCode(Transceiver transceiver, Error& err, float wpm, const char* sequence, uint16_t sequenceLen);
+
+    private:
+        /// Mutex for concurrent access protection
+        StaticSemaphore_t resourcesMutexBuffer = {};
+        SemaphoreHandle_t resourcesMutexHandle;
+        uint16_t mutexTimeout = 100; // in ms
+        // TODO maybe it would be better to use a separate timeout for "time critical"
+        //      procedures (like freezing the AGC) and a less strict one for stuff like reading the drivers parameters
+
+        /// Binary semaphores for signaling external events
+        StaticSemaphore_t spiWriteCompleteSemaphoreBuffer = {};
+        StaticSemaphore_t spiReadCompleteSemaphoreBuffer = {};
+        StaticSemaphore_t iqEecTransmissionCompleteSemaphoreBuffer09 = {};
+        StaticSemaphore_t iqPreambleReceptionSemaphoreBuffer09 = {};
+        StaticSemaphore_t iqPacketReceptionSemaphoreBuffer09 = {};
+        StaticSemaphore_t iqEecTransmissionCompleteSemaphoreBuffer24 = {};
+        StaticSemaphore_t iqPreambleReceptionSemaphoreBuffer24 = {};
+        StaticSemaphore_t iqPacketReceptionSemaphoreBuffer24 = {};
+
+        /// Binary semaphores for signaling events from handle_irq()
+        StaticSemaphore_t basebandTx09SemaphoreBuffer = {};
+        SemaphoreHandle_t basebandTx09SemaphoreHandle;  // signal finished transmission for sub GHz baseband core
+
+        StaticSemaphore_t basebandTx24SemaphoreBuffer = {};
+        SemaphoreHandle_t basebandTx24SemaphoreHandle; // signal finished transmission for 2.4 baseband core
+
+        StaticSemaphore_t basebandRx09SemaphoreBuffer = {};
+        SemaphoreHandle_t basebandRx09SemaphoreHandle; // signal finished reception for sub GHz baseband core
+
+        StaticSemaphore_t basebandRx24SemaphoreBuffer = {};
+        SemaphoreHandle_t basebandRx24SemaphoreHandle; // signal finished reception for 2.4 GHz baseband core
+
+        StaticSemaphore_t energyDetCompletion09SemaphoreBuffer = {};
+        SemaphoreHandle_t energyDetCompletion09SemaphoreHandle;
+
+        StaticSemaphore_t energyDetCompletion24SemaphoreBuffer = {};
+        SemaphoreHandle_t energyDetCompletion24SemaphoreHandle;
+
+        /// SPI handle
+        SPI_HandleTypeDef* hspi;
+
         /// Structs with register configurations
         GeneralConfiguration generalConfig;
         RXConfig rxConfig;
@@ -47,96 +378,33 @@ namespace AT86RF215 {
         RadioInterruptsConfig radioInterruptsConfig;
         IQInterfaceConfig iqInterfaceConfig;
 
-        /// Flags indicating that a TX procedure is ongoing. For baseband core operations
-        /// these are handled automatically, but must be manually set/reset during I/Q mode
-        /// operations.
-        bool tx_ongoing_09;
-        bool tx_ongoing_24;
-        /// Flags indicating that an RX procedure is ongoing. For baseband core operations
-        /// and clear channel assessment these are handled automatically, but must be manually
-        /// set/reset during I/Q mode operations.
-        bool rx_ongoing_09;
-        bool rx_ongoing_24;
-        /// Flags indicating that the Clear Channel Assessment procedure is ongoing
-        bool cca_ongoing_09;
-        bool cca_ongoing_24;
+        enum class UserRequest {
+            BASEBAND_RX,                          // rx with baseband core
+            BASEBAND_TX,                          // tx with baseband core
+            IQ_EEC_TX,                            // tx with I/Q interface, using embedded control
+            IQ_RX,                                // rx with I/Q interface
+            SINGLE_SHOT_ENERGY_MEASUREMENT,       // use frontend to measure energy
+            NO_REQUEST
+        };
+        UserRequest userRequest09;
+        UserRequest userRequest24;
 
-        /// To avoid concurrent access, the user of this driver should take the semaphore first
-        SemaphoreHandle_t resources_mtx;
+        /// Indicate whether the radio (and possibly the baseband core) are occupied with a tx/rx/energy
+        /// measurement operation
+        bool transceiverOccupied09;
+        bool transceiverOccupied24;
 
-        /// Buffer for storing a received packet in baseband core operation
-        uint8_t received_packet[2047];
+        /// User provided buffer for storing a received packet in baseband core operation
+        uint8_t* destBuffer09;
+        uint8_t* destBuffer24;
+
         /// Received packet's length in baseband core operation
-        uint16_t received_packet_length = 0;
+        uint16_t received_packet_length09;
+        uint16_t received_packet_length24;
+
         /// Result of a clear channel assessment is stored here
-        int8_t energy_measurement = 0;
-
-        /// Flags indicating a radio interrupt has occurred (offered for debugging purposes, must be manually reset)
-        bool IFSynchronization_flag = false;
-        bool TransceiverError_flag = false;
-        bool EnergyDetectionCompletion_flag = false;
-        bool TransceiverReady_flag  = false;
-        bool Wakeup_flag = false;
-        bool BatteryLow_flag = false;
-
-        /// Flags indicating a baseband core interrupt has occurred (offered for debugging purposes, must be manually reset)
-        bool FrameBufferLevelIndication_flag = false;
-        bool AGCRelease_flag = false;
-        bool AGCHold_flag = false;
-        bool TransmitterFrameEnd_flag = false;
-        bool ReceiverExtendMatch_flag = false;
-        bool ReceiverAddressMatch_flag = false;
-        bool ReceiverFrameEnd_flag = false;
-        bool ReceiverFrameStart_flag = false;
-
-        /**
-         * Initializer for AT86RF215
-         *
-         * @param hspim: pointer to the SPI_HandleTypeDef responsible for configuring the SPI.
-         *
-         */
-        // Constructor with general config only
-        At86rf215_Utilities()
-                : tx_ongoing_09(false), tx_ongoing_24(false), rx_ongoing_09(false),
-                  rx_ongoing_24(false), cca_ongoing_09(false), cca_ongoing_24(false) {
-            // Initialize the semaphore
-            resources_mtx = xSemaphoreCreateMutexStatic(&mtx_buf);
-            if (resources_mtx == nullptr) {
-                LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphore";
-            }
-        }
-
-        void registerSPIHandle(SPI_HandleTypeDef* handle) {
-            hspi = handle;
-        }
-
-        void setGeneralConfig(GeneralConfiguration&& GeneralConfig) {
-            generalConfig = std::move(GeneralConfig);
-        }
-        void setRXConfig(RXConfig&& RXConfig) {
-            rxConfig = std::move(RXConfig); // Move the new config into rxConfig
-        }
-        void setTXConfig(TXConfig&& TXConfig) {
-            txConfig = std::move(TXConfig); // Move the new config into rxConfig
-        }
-        void setBaseBandCoreConfig(BasebandCoreConfig&& BasebandCoreConfig) {
-            basebandCoreConfig = std::move(BasebandCoreConfig); // Move the new config into rxConfig
-        }
-        void setFrequencySynthesizerConfig(FrequencySynthesizerConfig&& FrequencySynthesizer) {
-            freqSynthesizerConfig = std::move(FrequencySynthesizer); // Move the new config into rxConfig
-        }
-        void setExternalFrontEndControlConfig(ExternalFrontEndConfig&& ExternalFrontEndConfig) {
-            externalFrontEndConfig = std::move(ExternalFrontEndConfig);
-        }
-        void setInterruptConfig(BasebandCoreInterruptsConfig&& InterruptsConfig) {
-            basebandCoreInterruptsConfig = std::move(InterruptsConfig);
-        }
-        void setRadioInterruptConfig(RadioInterruptsConfig&& RadioInterruptsConfig) {
-            radioInterruptsConfig = std::move(RadioInterruptsConfig);
-        }
-        void setIQInterfaceConfig(IQInterfaceConfig&& IQInterfaceConfig) {
-            iqInterfaceConfig = std::move(IQInterfaceConfig);
-        }
+        int8_t energy_measurement09;
+        int8_t energy_measurement24;
 
         /**
          * Writes a byte to a specified address
@@ -185,7 +453,7 @@ namespace AT86RF215 {
          * @param transceiver	Specifies the transceiver used
          * @param err			Pointer to raised error
          */
-        State get_state(Transceiver transceiver, Error& err);
+        State get_state_private(Transceiver transceiver, Error& err);
 
         /**
          * Sets the state of the transceiver
@@ -194,14 +462,7 @@ namespace AT86RF215 {
          * @param state_cmd		Command responsible for changing the state
          * @param err			Pointer to raised error
          */
-        void set_state(Transceiver transceiver, State state_cmd, Error& err);
-
-        /**
-         * Does chip reset and reads from the interrupt status registers via SPI, resetting them.
-         * It also restores the config settings
-         * @param error		Pointer to raised error
-         */
-        void chip_reset(Error& error);
+        void set_state_private(Transceiver transceiver, State state_cmd, Error& err);
 
         /**
          * Sets PLL channel spacing (25kHz resolution)
@@ -678,14 +939,6 @@ namespace AT86RF215 {
                             bool receiverFrameEnd, bool receiverFrameStart, Error& err);
 
         /**
-         * Sets up the target registers based on the default configuration. It accesses *all* writable registers and
-         * therefore, it requires the transceiver to be in the `TXPREP` state.
-         *
-         * @param err				Pointer to raised error
-         */
-        void setup(Error& err);
-
-        /**
          *
          * Returns the IRQ register from the corresponding transceiver
          *
@@ -693,8 +946,6 @@ namespace AT86RF215 {
          * @param err				Pointer to raised error
          */
         uint8_t get_irq(Transceiver transceiver, Error& err);
-
-        etl::expected<void, Error> check_transceiver_connection(Error& err);
 
         void set_bbc_fskc0_config(Transceiver transceiver,
                                   Bandwidth_time_product bt, Mod_index_scale midxs, Mod_index midx, FSK_mod_order mord,
@@ -731,43 +982,6 @@ namespace AT86RF215 {
                                             ExternalFrontEndControl frontEndControl,
                                             Error& err);
 
-        void print_state(Transceiver transceiver, Error& err);
-        void print_error(Error& err);
-        /**
-         * This function is called automatically whenever an interrupt is raised. It reads the interrupt status registers
-         * and takes action depending on the raised interrupt status.
-         */
-        void handle_irq();
-
-        /**
-         * Measures the received energy in the bandwidth specified
-         * @param transceiver       Selected transceiver
-         * @param err               Pointer to raised error
-         */
-        // TODO: Perhaps specify bw here as optional parameter or just control it via the config?
-        void clear_channel_assessment(Transceiver transceiver, Error& err);
-
-        /**
-         * Begins transmitting operations for Tx packet and automatically sets the `tx_ongoing` flag to inhibit conflicting
-         * transmissions. The flag is automatically reset on a frame end interrupt.
-         *
-         * @param transceiver		Specifies the transceiver used
-         * @param packet			Pointer to packet data
-         * @param length			Length of packet
-         * @param err				Pointer to raised error
-         *
-         */
-        void packetTransmissionBaseband(Transceiver transceiver, uint8_t* packet,
-                                        uint16_t length, Error& err);
-
-        /**
-         * Begins receiving operations for Rx packet
-         *
-         * @param transceiver		Specifies the transceiver used
-         * @param err				Pointer to raised error
-         */
-        void prepareForPacketReceptionBaseband(Transceiver transceiver, Error &err);
-
         etl::expected<uint16_t, Error> get_received_length(Transceiver transceiver, Error& err);
 
         /**
@@ -778,12 +992,15 @@ namespace AT86RF215 {
          */
         void packetReceptionBaseband(Transceiver transceiver, Error& err);
 
-    private:
-        /// Storage for mutex
-        StaticSemaphore_t mtx_buf = {};
-        /// SPI handle
-        SPI_HandleTypeDef* hspi;
+        /**
+         * Sets up the target registers. It accesses *all* writable registers and
+         * therefore, it requires the transceiver to be in the `TXPREP` state.
+         *
+         * @param err				Pointer to raised error
+         */
+        void setup(Error& err);
     };
+
 
     extern At86rf215_Utilities transceiverUtils;
 } // namespace AT86RF215
