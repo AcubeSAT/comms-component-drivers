@@ -25,17 +25,6 @@ namespace eMMC {
     };
 
     /**
-     * Used by ISR to indicate an eMMC transaction is complete.
-     */
-    struct EMMCTransactionFlags {
-        bool WriteComplete = false;
-        bool ReadComplete = false;
-        bool ErrorOccured = false;
-        bool TransactionAborted = false;
-    };
-    extern EMMCTransactionFlags eMMCTransactionFlags;
-
-    /**
      * @details Memory item: A generic data structure, which can be useful when the user needs to store
      *              only one item.
      * @note Define your memory items in MemoryItems.def
@@ -60,6 +49,19 @@ namespace eMMC {
 
     class eMMC_Utilities {
     public:
+        /**
+         * Used by the ISRs to state the status of the transfer
+         */
+        volatile bool writeComplete = false;
+        volatile bool readComplete = false;
+        volatile bool errorOccured = false;
+        volatile bool transactionAborted = false;
+
+        /**
+         * Used by the ISRs to indicate about the a transfer event
+         */
+         SemaphoreHandle_t isrTriggeredSemaphoreHandle;
+
         explicit eMMC_Utilities();
 
         /**
@@ -142,7 +144,7 @@ namespace eMMC {
         /**
          * @brief Utility function. Read from eMMC blocks.
          */
-        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks) const;
+        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
     private:
         /**
          * Size parameters for the SDINBDG4-8G
@@ -158,6 +160,7 @@ namespace eMMC {
         MMC_HandleTypeDef *hmmc;
         SemaphoreHandle_t eMMC_semaphoreHandle; // for concurrent access protection to the EMMC peripheral itself
         StaticSemaphore_t eMMC_semaphoreBuffer;
+        StaticSemaphore_t isrTriggeredSemaphoreBuffer;
         uint32_t transactionTimeoutPerBlock = 100; // ms
         uint32_t semaphoreTimeout = 1000;       // ms
 
