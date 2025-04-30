@@ -5,6 +5,11 @@
 namespace eMMC {
     eMMC_Utilities::eMMC_Utilities() {
         eMMC_semaphoreHandle = xSemaphoreCreateMutexStatic(&eMMC_semaphoreBuffer);
+        isrTriggeredSemaphoreHandle = xSemaphoreCreateBinaryStatic(&isrTriggeredSemaphoreBuffer);
+
+        if (eMMC_semaphoreHandle == nullptr || isrTriggeredSemaphoreHandle == nullptr) {
+            LOG_ERROR << "[EMMC Driver] Failed to create mutex or semaphore";
+        }
 
         // Initialize the memoryMap array using the sizes from MemoryItems.def
 #define MEMORY_ITEM(name, size) memoryItemMap[name] = MemoryItemHandler(size);
@@ -300,14 +305,15 @@ namespace eMMC {
         return etl::make_pair(itemsToPush, Error::EMMC_NO_ERROR);
     }
 
-    etl::expected<void, Error> eMMC_Utilities::readBlockEMMC(uint8_t* destBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) const {
+    etl::expected<void, Error> eMMC_Utilities::readBlockEMMC(uint8_t* destBuffer, const uint32_t block_address, const uint32_t numberOfBlocks)
+    {
         if (xSemaphoreTake(eMMC_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
-        eMMCTransactionFlags.ReadComplete = false;
-        eMMCTransactionFlags.ErrorOccured = false;
-        eMMCTransactionFlags.TransactionAborted = false;
+        readComplete = false;
+        errorOccured = false;
+        transactionAborted = false;
 
         if (HAL_MMC_ReadBlocks_IT(hmmc, destBuffer, block_address, numberOfBlocks) != HAL_OK) {
             xSemaphoreGive(eMMC_semaphoreHandle);
@@ -318,34 +324,34 @@ namespace eMMC {
         //         return etl::unexpected(Error::EMMC_READ_FAILURE);
         // }
 
-        const uint32_t startTime = xTaskGetTickCount();
-        while (true) {
-            vTaskDelay(1);
-            if (eMMCTransactionFlags.ReadComplete) {
-                xSemaphoreGive(eMMC_semaphoreHandle);
-                return {};
-            }
-
-            // Transaction timeout
-            if (xTaskGetTickCount() - startTime> pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) {
-                xSemaphoreGive(eMMC_semaphoreHandle);
-                return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
-            }
-
-            // Error callback was called
-            if (eMMCTransactionFlags.ErrorOccured) {
-                /// TODO: handle the error, check hmmc handle for error messages.
-                xSemaphoreGive(eMMC_semaphoreHandle);
-                return etl::unexpected(Error::EMMC_READ_FAILURE);
-            }
-
-            // Transaction aborted was called
-            if (eMMCTransactionFlags.TransactionAborted) {
-                /// TODO: handle the error, check hmmc handle for error messages.
-                xSemaphoreGive(eMMC_semaphoreHandle);
-                return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
-            }
+        if (xSemaphoreTake(isrTriggeredSemaphoreHandle, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) != pdTRUE) {
+            // timed out
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
         }
+
+        if (readComplete) {
+            // success
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return {};
+        }
+
+        if (errorOccured) {
+            // error callback was called
+            /// TODO: handle the error, check hmmc handle for error messages.
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return etl::unexpected(Error::EMMC_READ_FAILURE);
+        }
+
+        if (transactionAborted) {
+            // abort callback was called
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
+        }
+
+        // unknown error
+        xSemaphoreGive(eMMC_semaphoreHandle);
+        return etl::unexpected(Error::EMMC_READ_FAILURE);
     }
 
     etl::expected<void, Error> eMMC_Utilities::writeBlockEMMC(const uint8_t* sourceBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
@@ -353,9 +359,9 @@ namespace eMMC {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
-        eMMCTransactionFlags.WriteComplete = false;
-        eMMCTransactionFlags.ErrorOccured = false;
-        eMMCTransactionFlags.TransactionAborted = false;
+        writeComplete = false;
+        errorOccured = false;
+        transactionAborted = false;
 
         if (HAL_MMC_WriteBlocks_IT(hmmc, sourceBuffer, block_address, numberOfBlocks) != HAL_OK) {
             xSemaphoreGive(eMMC_semaphoreHandle);
@@ -366,34 +372,34 @@ namespace eMMC {
         //     return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         // }
 
-        const uint32_t startTime = xTaskGetTickCount();
-        while (true) {
-            vTaskDelay(1);
-            if (eMMCTransactionFlags.WriteComplete) {
-                xSemaphoreGive(eMMC_semaphoreHandle);
-                return {};
-            }
-
-            // Transaction timeout
-            if (xTaskGetTickCount() - startTime > pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) {
-                xSemaphoreGive(eMMC_semaphoreHandle);
-                return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
-            }
-
-            // Error callback was called
-            if (eMMCTransactionFlags.ErrorOccured) {
-                /// TODO: handle the error, check eMMCTransactionHandler.hmmcSnapshot for error messages.
-                xSemaphoreGive(eMMC_semaphoreHandle);
-                return etl::unexpected(Error::EMMC_WRITE_FAILURE);
-            }
-
-            // Transaction aborted was called
-            if (eMMCTransactionFlags.TransactionAborted) {
-                /// TODO: handle the error, check hmmc handle for error messages.
-                xSemaphoreGive(eMMC_semaphoreHandle);
-                return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
-            }
+        if (xSemaphoreTake(isrTriggeredSemaphoreHandle, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) != pdTRUE) {
+            // timed out
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
         }
+
+        if (writeComplete) {
+            // success
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return {};
+        }
+
+        if (errorOccured) {
+            // error callback was called
+            /// TODO: handle the error, check hmmc handle for error messages.
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return etl::unexpected(Error::EMMC_WRITE_FAILURE);
+        }
+
+        if (transactionAborted) {
+            // abort callback was called
+            xSemaphoreGive(eMMC_semaphoreHandle);
+            return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
+        }
+
+        // unknown error
+        xSemaphoreGive(eMMC_semaphoreHandle);
+        return etl::unexpected(Error::EMMC_WRITE_FAILURE);
     }
 
     etl::expected<void, Error> eMMC_Utilities::eraseBlocksEMMC(const uint32_t block_address_start, const  uint32_t block_address_end) {
@@ -416,5 +422,4 @@ namespace eMMC {
     }
 
     eMMC_Utilities eMMC_Utils = eMMC_Utilities();
-    EMMCTransactionFlags eMMCTransactionFlags;
 } // namespace eMMC
