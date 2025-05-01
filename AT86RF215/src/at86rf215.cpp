@@ -945,8 +945,16 @@ static constexpr MorseCodeMapping getMorse(char c) {
                                       Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF)};
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
-        uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, value, n);
 
+        uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, msg, 2);
+        if (hal_error != HAL_OK ||
+            xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            err = Error::FAILED_WRITING_TO_REGISTER;
+            return;
+        }
+
+        hal_error = HAL_SPI_Transmit_DMA(hspi, value, n);
         if (hal_error != HAL_OK ||
             xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
@@ -965,7 +973,6 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
         uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, n + 2);
-
         if (hal_error != HAL_OK ||
             xSemaphoreTake(spiReadCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
