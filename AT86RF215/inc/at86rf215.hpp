@@ -384,6 +384,7 @@ namespace AT86RF215 {
             IQ_EEC_TX,                            // tx with I/Q interface, using embedded control
             IQ_RX,                                // rx with I/Q interface
             SINGLE_SHOT_ENERGY_MEASUREMENT,       // use frontend to measure energy
+            MORCE_CODE_OOK,                       // transmit a sequence of characters using OOK modulation and morse code
             NO_REQUEST
         };
         UserRequest userRequest09;
