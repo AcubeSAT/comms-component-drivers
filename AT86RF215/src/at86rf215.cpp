@@ -521,7 +521,14 @@ static constexpr MorseCodeMapping getMorse(char c) {
         spi_write_8(txfll_reg, 0xFF, err);
         spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // enable in-phase DAC overwrite with max amplitude
         spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // enable quadrature-phase DAC overwrite with min amplitude
+
+        if (transceiver == RF09) {
+            userRequest09 = UserRequest::MORCE_CODE_OOK;
+        } else {
+            userRequest24 = UserRequest::MORCE_CODE_OOK;
+        }
         set_state_private(transceiver, State::RF_TXPREP, err);
+        xSemaphoreGive(resourcesMutexHandle);
 
         const auto timeUnit = static_cast<uint16_t>(1200 / wpm);
         for (uint16_t i = 0; i < sequenceLen; i++) {
@@ -537,13 +544,26 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
             // transmit character
             for (uint8_t j = 0; j < morseCodeMapping.dotDashNum; j++) {
+                if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                    err = Error::RESOURCE_MUTEX_TIMEOUT;
+                    return;
+                }
                 set_state_private(transceiver, State::RF_TX, err);
+                xSemaphoreGive(resourcesMutexHandle);
+
                 if (morseCodeMapping.dotDashMapping & (0x80 >> j)) { // dot
                     vTaskDelay(pdMS_TO_TICKS(timeUnit));
                 } else {                                             // dash
                     vTaskDelay(3*pdMS_TO_TICKS(timeUnit));
                 }
+
+                if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+                    err = Error::RESOURCE_MUTEX_TIMEOUT;
+                    return;
+                }
                 set_state_private(transceiver, State::RF_TXPREP, err);
+                xSemaphoreGive(resourcesMutexHandle);
+
 
                 // delay between character elements
                 if (j != morseCodeMapping.dotDashNum - 1) {
@@ -557,6 +577,11 @@ static constexpr MorseCodeMapping getMorse(char c) {
             }
         }
 
+        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            err = Error::RESOURCE_MUTEX_TIMEOUT;
+            return;
+        }
+
         // restore original configuration
         spi_write_8(iqfc1_reg, iqfc1_val, err);
         spi_write_8(pc_reg, pc_val, err);
@@ -565,6 +590,11 @@ static constexpr MorseCodeMapping getMorse(char c) {
         spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // disable in-phase DAC overwrite
         spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // disable quadrature-phase DAC overwrite
 
+        if (transceiver == RF09) {
+            transceiverOccupied09 = false;
+        } else {
+            transceiverOccupied24 = false;
+        }
         err = Error::NO_ERRORS;
         xSemaphoreGive(resourcesMutexHandle);
     }
@@ -740,8 +770,10 @@ static constexpr MorseCodeMapping getMorse(char c) {
                 set_state_private(Transceiver::RF09, State::RF_TX, err);
             }
 
-            // No need to set the state to TX. This is performed automatically when I_DATA[0] == 1
-            if (userRequest09 == UserRequest::IQ_EEC_TX) {
+            // IQ_EEC_TX: No need to set the state to TX. This is performed automatically when I_DATA[0] == 1
+            // MORSE_CODE_OOK: No action needs to be taken, just mark the transceiver as occupied
+            if (userRequest09 == UserRequest::IQ_EEC_TX ||
+                userRequest09 == UserRequest::MORCE_CODE_OOK) {
                 transceiverOccupied09 = true;
             }
         }
@@ -834,10 +866,10 @@ static constexpr MorseCodeMapping getMorse(char c) {
                 userRequest24 == UserRequest::BASEBAND_RX ||
                 userRequest24 == UserRequest::IQ_RX) {
                 set_state_private(Transceiver::RF24, State::RF_RX, err);
-            }
+                }
 
             // Disable baseband core if there is a cca procedure and initialize the
-            // single shot measurement
+            // single shot measurement.
             if (userRequest24 == UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT) {
                 transceiverOccupied24 = true;
                 uint8_t bbcpc = spi_read_8(BBC1_PC,err);
@@ -848,6 +880,13 @@ static constexpr MorseCodeMapping getMorse(char c) {
             if (userRequest24 == UserRequest::BASEBAND_TX) {
                 transceiverOccupied24 = true;
                 set_state_private(Transceiver::RF24, State::RF_TX, err);
+            }
+
+            // IQ_EEC_TX: No need to set the state to TX. This is performed automatically when I_DATA[0] == 1
+            // MORSE_CODE_OOK: No action needs to be taken, just mark the transceiver as occupied
+            if (userRequest24 == UserRequest::IQ_EEC_TX ||
+                userRequest24 == UserRequest::MORCE_CODE_OOK) {
+                transceiverOccupied09 = true;
             }
         }
         if ((irq & InterruptMask::Wakeup) != 0) {
