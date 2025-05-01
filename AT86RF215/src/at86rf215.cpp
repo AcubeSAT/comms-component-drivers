@@ -913,6 +913,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         if (hal_error != HAL_OK ||
             xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_WRITING_TO_REGISTER;
             return;
         }
@@ -929,6 +930,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         if (hal_error != HAL_OK ||
             xSemaphoreTake(spiReadCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return 0;
         }
@@ -947,6 +949,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         if (hal_error != HAL_OK ||
             xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_WRITING_TO_REGISTER;
             return;
         }
@@ -965,6 +968,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         if (hal_error != HAL_OK ||
             xSemaphoreTake(spiReadCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return response;
         }
