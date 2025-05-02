@@ -52,22 +52,22 @@ namespace AT86RF215 {
         EventGroupHandle_t eventGroupHandle;
 
         /// "External" event group bits. The user must trigger these events from the proper ISR or freertos task
-        constexpr uint32_t spiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
-        constexpr uint32_t spiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
-        constexpr uint32_t iqEecTransmissionComplete09GroupBit = 1U << 2; // completion of tx using I/Q interface with embedded control
-        constexpr uint32_t iqPreambleReception09GroupBit       = 1U << 3; // reception of a preamble using the I/Q interface
-        constexpr uint32_t iqPacketReception09GroupBit         = 1U << 4; // full reception of a packet using the I/Q interface
-        constexpr uint32_t iqEecTransmissionComplete24GroupBit = 1U << 5; // completion of tx using I/Q interface with embedded control
-        constexpr uint32_t iqPreambleReception24GroupBit       = 1U << 6; // reception of a preamble using the I/Q interface
-        constexpr uint32_t iqPacketReception24GroupBit         = 1U << 7; // full reception of a packet using the I/Q interface
+        const uint32_t spiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
+        const uint32_t spiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
+        const uint32_t iqEecTransmissionComplete09GroupBit = 1U << 2; // completion of tx using I/Q interface with embedded control
+        const uint32_t iqPreambleReception09GroupBit       = 1U << 3; // reception of a preamble using the I/Q interface
+        const uint32_t iqPacketReception09GroupBit         = 1U << 4; // full reception of a packet using the I/Q interface
+        const uint32_t iqEecTransmissionComplete24GroupBit = 1U << 5; // completion of tx using I/Q interface with embedded control
+        const uint32_t iqPreambleReception24GroupBit       = 1U << 6; // reception of a preamble using the I/Q interface
+        const uint32_t iqPacketReception24GroupBit         = 1U << 7; // full reception of a packet using the I/Q interface
 
         /// "Internal" event group bits. Used for communication of certain driver functions with handle_irq()
-        constexpr uint32_t basebandTx09GroupBit          = 1U << 8; // signal finished transmission for sub GHz baseband core
-        constexpr uint32_t basebandTx24GroupBit          = 1U << 9; // signal finished transmission for 2.4 baseband core
-        constexpr uint32_t basebandRx09GroupBit          = 1U << 10; // signal finished reception for sub GHz baseband core
-        constexpr uint32_t basebandRx24GroupBit          = 1U << 11; // signal finished reception for 2.4 GHz baseband core
-        constexpr uint32_t energyDetCompletion09GroupBit = 1U << 12;
-        constexpr uint32_t energyDetCompletion24GroupBit = 1U << 13;
+        const uint32_t basebandTx09GroupBit          = 1U << 8; // signal finished transmission for sub GHz baseband core
+        const uint32_t basebandTx24GroupBit          = 1U << 9; // signal finished transmission for 2.4 baseband core
+        const uint32_t basebandRx09GroupBit          = 1U << 10; // signal finished reception for sub GHz baseband core
+        const uint32_t basebandRx24GroupBit          = 1U << 11; // signal finished reception for 2.4 GHz baseband core
+        const uint32_t energyDetCompletion09GroupBit = 1U << 12;
+        const uint32_t energyDetCompletion24GroupBit = 1U << 13;
 
         /// Flags indicating a radio interrupt has occurred (offered for debugging purposes only, must be manually reset)
         bool IFSynchronization_flag = false;
