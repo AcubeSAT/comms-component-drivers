@@ -2,10 +2,12 @@
 
 #include <utility>
 #include <cstdint>
+
 #include "etl/expected.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
+#include "event_groups.h"
 #include "Logger.hpp"
 #include "at86rf215definitions.hpp"
 #include "at86rf215config.hpp"
@@ -46,6 +48,27 @@ namespace AT86RF215 {
 
     class At86rf215_Utilities {
     public:
+        /// Event group for signaling various events
+        EventGroupHandle_t eventGroupHandle;
+
+        /// "External" event group bits. The user must trigger these events from the proper ISR or freertos task
+        constexpr uint32_t spiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
+        constexpr uint32_t spiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
+        constexpr uint32_t iqEecTransmissionComplete09GroupBit = 1U << 2; // completion of tx using I/Q interface with embedded control
+        constexpr uint32_t iqPreambleReception09GroupBit       = 1U << 3; // reception of a preamble using the I/Q interface
+        constexpr uint32_t iqPacketReception09GroupBit         = 1U << 4; // full reception of a packet using the I/Q interface
+        constexpr uint32_t iqEecTransmissionComplete24GroupBit = 1U << 5; // completion of tx using I/Q interface with embedded control
+        constexpr uint32_t iqPreambleReception24GroupBit       = 1U << 6; // reception of a preamble using the I/Q interface
+        constexpr uint32_t iqPacketReception24GroupBit         = 1U << 7; // full reception of a packet using the I/Q interface
+
+        /// "Internal" event group bits. Used for communication of certain driver functions with handle_irq()
+        constexpr uint32_t basebandTx09GroupBit          = 1U << 8; // signal finished transmission for sub GHz baseband core
+        constexpr uint32_t basebandTx24GroupBit          = 1U << 9; // signal finished transmission for 2.4 baseband core
+        constexpr uint32_t basebandRx09GroupBit          = 1U << 10; // signal finished reception for sub GHz baseband core
+        constexpr uint32_t basebandRx24GroupBit          = 1U << 11; // signal finished reception for 2.4 GHz baseband core
+        constexpr uint32_t energyDetCompletion09GroupBit = 1U << 12;
+        constexpr uint32_t energyDetCompletion24GroupBit = 1U << 13;
+
         /// Flags indicating a radio interrupt has occurred (offered for debugging purposes only, must be manually reset)
         bool IFSynchronization_flag = false;
         bool TransceiverError_flag = false;
@@ -64,16 +87,6 @@ namespace AT86RF215 {
         bool ReceiverFrameEnd_flag = false;
         bool ReceiverFrameStart_flag = false;
 
-        /// Binary semaphores for signaling certain events (add them inside the proper ISR or freertos tak)
-        SemaphoreHandle_t spiWriteCompleteSemaphoreHandle;          // completion of spi write from dma callback
-        SemaphoreHandle_t spiReadCompleteSemaphoreHandle;           // completion of spi read from dma callback
-        SemaphoreHandle_t iqEecTransmissionCompleteSemaphoreHandle09; // completion of tx using I/Q interface with embedded control
-        SemaphoreHandle_t iqPreambleReceptionSemaphoreHandle09;       // reception of a preamble using the I/Q interface
-        SemaphoreHandle_t iqPacketReceptionSemaphoreHandle09;         // full reception of a packet using the I/Q interface
-        SemaphoreHandle_t iqEecTransmissionCompleteSemaphoreHandle24; // completion of tx using I/Q interface with embedded control
-        SemaphoreHandle_t iqPreambleReceptionSemaphoreHandle24;       // reception of a preamble using the I/Q interface
-        SemaphoreHandle_t iqPacketReceptionSemaphoreHandle24;         // full reception of a packet using the I/Q interface
-
         /**
          * Initializer for AT86RF215 driver
          */
@@ -82,38 +95,14 @@ namespace AT86RF215 {
                   userRequest09(UserRequest::NO_REQUEST), userRequest24(UserRequest::NO_REQUEST),
                   energy_measurement09(0), energy_measurement24(0), received_packet_length09(0),
                   received_packet_length24(0) {
-            // Initialize the mutex and the binary semaphores
+
+
+            // Initialize the mutex and the event group
             resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
-            spiWriteCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiWriteCompleteSemaphoreBuffer);
-            spiReadCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiReadCompleteSemaphoreBuffer);
-            basebandTx09SemaphoreHandle = xSemaphoreCreateBinaryStatic(&basebandTx09SemaphoreBuffer);
-            basebandTx24SemaphoreHandle = xSemaphoreCreateBinaryStatic(&basebandTx24SemaphoreBuffer);
-            basebandRx09SemaphoreHandle = xSemaphoreCreateBinaryStatic(&basebandRx09SemaphoreBuffer);
-            basebandRx24SemaphoreHandle = xSemaphoreCreateBinaryStatic(&basebandRx24SemaphoreBuffer);
-            energyDetCompletion09SemaphoreHandle = xSemaphoreCreateBinaryStatic(&energyDetCompletion09SemaphoreBuffer);
-            energyDetCompletion24SemaphoreHandle = xSemaphoreCreateBinaryStatic(&energyDetCompletion24SemaphoreBuffer);
-            iqEecTransmissionCompleteSemaphoreHandle09 = xSemaphoreCreateBinaryStatic(&iqEecTransmissionCompleteSemaphoreBuffer09);
-            iqPreambleReceptionSemaphoreHandle09 = xSemaphoreCreateBinaryStatic(&iqPreambleReceptionSemaphoreBuffer09);
-            iqPacketReceptionSemaphoreHandle09 = xSemaphoreCreateBinaryStatic(&iqPacketReceptionSemaphoreBuffer09);
-            iqEecTransmissionCompleteSemaphoreHandle24 = xSemaphoreCreateBinaryStatic(&iqEecTransmissionCompleteSemaphoreBuffer24);
-            iqPreambleReceptionSemaphoreHandle24 = xSemaphoreCreateBinaryStatic(&iqPreambleReceptionSemaphoreBuffer24);
-            iqPacketReceptionSemaphoreHandle24 = xSemaphoreCreateBinaryStatic(&iqPacketReceptionSemaphoreBuffer24);
-            if (resourcesMutexHandle == nullptr ||
-                basebandTx09SemaphoreHandle == nullptr ||
-                basebandTx24SemaphoreHandle == nullptr ||
-                basebandRx09SemaphoreHandle == nullptr ||
-                basebandRx24SemaphoreHandle == nullptr ||
-                energyDetCompletion09SemaphoreHandle == nullptr ||
-                energyDetCompletion24SemaphoreHandle == nullptr ||
-                spiWriteCompleteSemaphoreHandle == nullptr ||
-                spiReadCompleteSemaphoreHandle == nullptr ||
-                iqEecTransmissionCompleteSemaphoreHandle09 == nullptr ||
-                iqPreambleReceptionSemaphoreHandle09 == nullptr ||
-                iqPacketReceptionSemaphoreHandle09 == nullptr ||
-                iqEecTransmissionCompleteSemaphoreHandle24 == nullptr ||
-                iqPreambleReceptionSemaphoreHandle24 == nullptr ||
-                iqPacketReceptionSemaphoreHandle24 == nullptr) {
-                LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphores";
+            eventGroupHandle = xEventGroupCreateStatic(&eventGroupBuffer);
+
+            if (resourcesMutexHandle == nullptr || eventGroupHandle == nullptr) {
+                LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphore or event group";
             }
 
             // Set the default configuration structures
@@ -335,34 +324,8 @@ namespace AT86RF215 {
         // TODO maybe it would be better to use a separate timeout for "time critical"
         //      procedures (like freezing the AGC) and a less strict one for stuff like reading the drivers parameters
 
-        /// Binary semaphores for signaling external events
-        StaticSemaphore_t spiWriteCompleteSemaphoreBuffer = {};
-        StaticSemaphore_t spiReadCompleteSemaphoreBuffer = {};
-        StaticSemaphore_t iqEecTransmissionCompleteSemaphoreBuffer09 = {};
-        StaticSemaphore_t iqPreambleReceptionSemaphoreBuffer09 = {};
-        StaticSemaphore_t iqPacketReceptionSemaphoreBuffer09 = {};
-        StaticSemaphore_t iqEecTransmissionCompleteSemaphoreBuffer24 = {};
-        StaticSemaphore_t iqPreambleReceptionSemaphoreBuffer24 = {};
-        StaticSemaphore_t iqPacketReceptionSemaphoreBuffer24 = {};
-
-        /// Binary semaphores for signaling events from handle_irq()
-        StaticSemaphore_t basebandTx09SemaphoreBuffer = {};
-        SemaphoreHandle_t basebandTx09SemaphoreHandle;  // signal finished transmission for sub GHz baseband core
-
-        StaticSemaphore_t basebandTx24SemaphoreBuffer = {};
-        SemaphoreHandle_t basebandTx24SemaphoreHandle; // signal finished transmission for 2.4 baseband core
-
-        StaticSemaphore_t basebandRx09SemaphoreBuffer = {};
-        SemaphoreHandle_t basebandRx09SemaphoreHandle; // signal finished reception for sub GHz baseband core
-
-        StaticSemaphore_t basebandRx24SemaphoreBuffer = {};
-        SemaphoreHandle_t basebandRx24SemaphoreHandle; // signal finished reception for 2.4 GHz baseband core
-
-        StaticSemaphore_t energyDetCompletion09SemaphoreBuffer = {};
-        SemaphoreHandle_t energyDetCompletion09SemaphoreHandle;
-
-        StaticSemaphore_t energyDetCompletion24SemaphoreBuffer = {};
-        SemaphoreHandle_t energyDetCompletion24SemaphoreHandle;
+        /// Event group for signaling various events
+        StaticEventGroup_t eventGroupBuffer;
 
         /// SPI handle
         SPI_HandleTypeDef* hspi;

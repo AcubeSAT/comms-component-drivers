@@ -48,7 +48,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
         case '8': return { 0b11100000, 5 };
         case '9': return { 0b11110000, 5 };
 
-        // Punctuation (including comma!)
+        // Punctuation
         case '.': return { 0b01010100, 6 };  // .-.-.-
         case ',': return { 0b11001100, 6 };  // --..--
         case '?': return { 0b00110000, 6 };  // ..--..
@@ -171,12 +171,18 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         // wait for the one shot measurement to finish
         if (transceiver == RF09) {
-            if (xSemaphoreTake(basebandTx09SemaphoreHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            if (xEventGroupWaitBits(eventGroupHandle,
+                energyDetCompletion09GroupBit,
+                pdTRUE, pdTRUE,
+                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
                 err = Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED;
                 return 0;
             }
         } else {
-            if (xSemaphoreTake(basebandTx24SemaphoreHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            if (xEventGroupWaitBits(eventGroupHandle,
+                energyDetCompletion24GroupBit,
+                pdTRUE, pdTRUE,
+                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
                 err = Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED;
                 return 0;
             }
@@ -254,11 +260,17 @@ static constexpr MorseCodeMapping getMorse(char c) {
         // wait for the semaphore tx complete semaphore, to ensure the operation
         // was completed
         if (transceiver == RF09) {
-            if (xSemaphoreTake(basebandTx09SemaphoreHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            if (xEventGroupWaitBits(eventGroupHandle,
+                basebandTx09GroupBit,
+                pdTRUE, pdTRUE,
+                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
                 err = Error::TRANSMISSION_FAILED;
             }
         } else {
-            if (xSemaphoreTake(basebandTx24SemaphoreHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            if (xEventGroupWaitBits(eventGroupHandle,
+                basebandTx24GroupBit,
+                pdTRUE, pdTRUE,
+                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
                 err = Error::TRANSMISSION_FAILED;
             }
         }
@@ -292,9 +304,15 @@ static constexpr MorseCodeMapping getMorse(char c) {
     uint16_t At86rf215_Utilities::waitForPacketReceptionBaseband(Transceiver transceiver, Error &err) {
         // wait until a new packet is received
         if (transceiver == RF09) {
-            xSemaphoreTake(basebandRx09SemaphoreHandle, portMAX_DELAY);
+            xEventGroupWaitBits(eventGroupHandle,
+                   basebandRx09GroupBit,
+                     pdTRUE, pdTRUE,
+                     portMAX_DELAY);
         } else {
-            xSemaphoreTake(basebandRx24SemaphoreHandle, portMAX_DELAY);
+            xEventGroupWaitBits(eventGroupHandle,
+                   basebandRx24GroupBit,
+                     pdTRUE, pdTRUE,
+                     portMAX_DELAY);
         }
 
         // return the length
@@ -332,13 +350,19 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         // wait for the baseband processor to end transmission
         if (transceiver == RF09) {
-            if (xSemaphoreTake(iqEecTransmissionCompleteSemaphoreHandle09, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            if (xEventGroupWaitBits(eventGroupHandle,
+                iqEecTransmissionComplete09GroupBit,
+                pdTRUE, pdTRUE,
+                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
                 err = Error::TRANSMISSION_FAILED;
                 transceiverOccupied09 = false;
                 return;
             }
         } else {
-            if (xSemaphoreTake(iqEecTransmissionCompleteSemaphoreHandle24, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            if (xEventGroupWaitBits(eventGroupHandle,
+                iqEecTransmissionComplete24GroupBit,
+                pdTRUE, pdTRUE,
+                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
                 err = Error::TRANSMISSION_FAILED;
                 transceiverOccupied24 = false;
                 return;
@@ -407,9 +431,15 @@ static constexpr MorseCodeMapping getMorse(char c) {
     void At86rf215_Utilities::waitForPacketReceptionIQ(Transceiver transceiver, Error& err) {
         // wait until a preamble is detected
         if (transceiver == RF09) {
-            xSemaphoreTake(iqPreambleReceptionSemaphoreHandle09, portMAX_DELAY);
+            xEventGroupWaitBits(eventGroupHandle,
+                                iqPreambleReception09GroupBit,
+                                pdTRUE, pdTRUE,
+                                portMAX_DELAY);
         } else {
-            xSemaphoreTake(iqPreambleReceptionSemaphoreHandle24, portMAX_DELAY);
+            xEventGroupWaitBits(eventGroupHandle,
+                                iqPreambleReception24GroupBit,
+                                pdTRUE, pdTRUE,
+                                portMAX_DELAY);
         }
 
         // "lock" the transceiver and freeze the agc
@@ -437,13 +467,19 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         // wait for packet reception
         if (transceiver == RF09) {
-            if (xSemaphoreTake(iqPacketReceptionSemaphoreHandle09, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            if (xEventGroupWaitBits(eventGroupHandle,
+                iqPacketReception09GroupBit,
+                pdTRUE, pdTRUE,
+                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
                 err = Error::RECEPTION_FAILED;
                 transceiverOccupied09 = false;
                 return;
             }
         } else {
-            if (xSemaphoreTake(iqPacketReceptionSemaphoreHandle24, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
+            if (xEventGroupWaitBits(eventGroupHandle,
+                iqPacketReception24GroupBit,
+                pdTRUE, pdTRUE,
+                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
                 err = Error::RECEPTION_FAILED;
                 transceiverOccupied24 = false;
                 return;
@@ -744,7 +780,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
             energy_measurement09 = get_receiver_energy_detection(Transceiver::RF09, err);
             transceiverOccupied09 = false;
-            xSemaphoreGive(energyDetCompletion09SemaphoreHandle);
+            xEventGroupSetBits(eventGroupHandle, energyDetCompletion09GroupBit);
         }
         if ((irq & InterruptMask::TransceiverReady) != 0) {
             TransceiverReady_flag = true;
@@ -802,7 +838,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
             transceiverOccupied09 = false;
 
             // notify packetTransmissionBaseband() about successful transmission
-            xSemaphoreGive(basebandTx09SemaphoreHandle);
+            xEventGroupSetBits(eventGroupHandle, basebandTx09GroupBit);
         }
         if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
             // Receiver Extended Match handling
@@ -822,7 +858,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
             transceiverOccupied09 = false;
 
             // notify packetReceptionBaseband()
-            xSemaphoreGive(basebandRx09SemaphoreHandle);
+            xEventGroupSetBits(eventGroupHandle, basebandRx09GroupBit);
         }
         if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
             ReceiverFrameStart_flag = true;
@@ -856,7 +892,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
             energy_measurement24 = get_receiver_energy_detection(Transceiver::RF24, err);
             transceiverOccupied24 = false;
-            xSemaphoreGive(energyDetCompletion24SemaphoreHandle);
+            xEventGroupSetBits(eventGroupHandle, energyDetCompletion24GroupBit);
         }
         if ((irq & InterruptMask::TransceiverReady) != 0) {
             TransceiverReady_flag = true;
@@ -912,7 +948,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
             transceiverOccupied24 = false;
 
             // notify packetTransmissionBaseband() about successful transmission
-            xSemaphoreGive(basebandTx24SemaphoreHandle);
+            xEventGroupSetBits(eventGroupHandle, basebandTx24GroupBit);
         }
         if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
             // Receiver Extended Match handling
@@ -932,7 +968,7 @@ static constexpr MorseCodeMapping getMorse(char c) {
             transceiverOccupied24 = false;
 
             // notify packetReceptionBaseband()
-            xSemaphoreGive(basebandRx24SemaphoreHandle);
+            xEventGroupSetBits(eventGroupHandle, basebandRx24GroupBit);
         }
         if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
             ReceiverFrameStart_flag = true;
@@ -951,7 +987,10 @@ static constexpr MorseCodeMapping getMorse(char c) {
         uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, msg, 3);
 
         if (hal_error != HAL_OK ||
-            xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            xEventGroupWaitBits(eventGroupHandle,
+                                spiWriteCompleteGroupBit,
+                                pdTRUE, pdTRUE,
+                                mutexTimeout) != pdTRUE) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_WRITING_TO_REGISTER;
             return;
@@ -968,7 +1007,10 @@ static constexpr MorseCodeMapping getMorse(char c) {
         uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, 3);
 
         if (hal_error != HAL_OK ||
-            xSemaphoreTake(spiReadCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            xEventGroupWaitBits(eventGroupHandle,
+                            spiReadCompleteGroupBit,
+                            pdTRUE, pdTRUE,
+                            mutexTimeout) != pdTRUE) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return 0;
@@ -987,7 +1029,10 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, msg, 2);
         if (hal_error != HAL_OK ||
-            xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            xEventGroupWaitBits(eventGroupHandle,
+                            spiWriteCompleteGroupBit,
+                            pdTRUE, pdTRUE,
+                            mutexTimeout) != pdTRUE) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_WRITING_TO_REGISTER;
             return;
@@ -995,7 +1040,10 @@ static constexpr MorseCodeMapping getMorse(char c) {
 
         hal_error = HAL_SPI_Transmit_DMA(hspi, value, n);
         if (hal_error != HAL_OK ||
-            xSemaphoreTake(spiWriteCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+            xEventGroupWaitBits(eventGroupHandle,
+                            spiWriteCompleteGroupBit,
+                            pdTRUE, pdTRUE,
+                            mutexTimeout) != pdTRUE) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_WRITING_TO_REGISTER;
             return;
@@ -1013,7 +1061,10 @@ static constexpr MorseCodeMapping getMorse(char c) {
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
         uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, n + 2);
         if (hal_error != HAL_OK ||
-            xSemaphoreTake(spiReadCompleteSemaphoreHandle, mutexTimeout) != pdTRUE) {
+        xEventGroupWaitBits(eventGroupHandle,
+                            spiReadCompleteGroupBit,
+                            pdTRUE, pdTRUE,
+                            mutexTimeout) != pdTRUE) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return response;
