@@ -120,7 +120,5 @@ namespace AC7Z020 {
 
         return length;
     }
-
-    AC7Z020_Utilities ac7z020Utils = AC7Z020_Utilities();
 }
 

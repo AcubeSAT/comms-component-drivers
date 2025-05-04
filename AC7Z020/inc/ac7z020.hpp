@@ -28,7 +28,9 @@ namespace AC7Z020 {
         /**
          * Initializer for AC7Z020 driver
          */
-        AC7Z020_Utilities() {
+        AC7Z020_Utilities(SPI_HandleTypeDef* handle) {
+            hspi = handle;
+
             resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
             spiWriteCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiWriteCompleteSemaphoreBuffer);
             spiReadCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiReadCompleteSemaphoreBuffer);
@@ -37,13 +39,6 @@ namespace AC7Z020 {
                 spiReadCompleteSemaphoreHandle == nullptr) {
                 LOG_ERROR << "[AC7Z020 Driver] Failed to create semaphores";
             }
-        }
-
-        /**
-         * @warning Do not use the driver before calling this function.
-         */
-        void registerSPIHandle(SPI_HandleTypeDef* handle) {
-            hspi = handle;
         }
 
         /**
