@@ -28,7 +28,7 @@ namespace AC7Z020 {
         /**
          * Initializer for AC7Z020 driver
          */
-        AC7Z020_Utilities(SPI_HandleTypeDef* handle) {
+        explicit AC7Z020_Utilities(SPI_HandleTypeDef* handle) {
             hspi = handle;
 
             resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
