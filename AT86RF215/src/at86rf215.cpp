@@ -7,75 +7,115 @@
 #include "Task.hpp"
 
 namespace AT86RF215 {
-static constexpr MorseCodeMapping getMorse(char c) {
-    switch (c) {
-        // Letters (uppercase + lowercase)
-        case 'A': case 'a': return { 0b01000000, 2 };  // .-
-        case 'B': case 'b': return { 0b10000000, 4 };  // -...
-        case 'C': case 'c': return { 0b10100000, 4 };  // -.-.
-        case 'D': case 'd': return { 0b10000000, 3 };  // -..
-        case 'E': case 'e': return { 0b00000000, 1 };  // .
-        case 'F': case 'f': return { 0b00100000, 4 };  // ..-.
-        case 'G': case 'g': return { 0b11000000, 3 };  // --.
-        case 'H': case 'h': return { 0b00000000, 4 };  // ....
-        case 'I': case 'i': return { 0b00000000, 2 };  // ..
-        case 'J': case 'j': return { 0b01110000, 4 };  // .---
-        case 'K': case 'k': return { 0b10100000, 3 };  // -.-
-        case 'L': case 'l': return { 0b01000000, 4 };  // .-..
-        case 'M': case 'm': return { 0b11000000, 2 };  // --
-        case 'N': case 'n': return { 0b10000000, 2 };  // -.
-        case 'O': case 'o': return { 0b11100000, 3 };  // ---
-        case 'P': case 'p': return { 0b01100000, 4 };  // .--.
-        case 'Q': case 'q': return { 0b11010000, 4 };  // --.-
-        case 'R': case 'r': return { 0b01000000, 3 };  // .-.
-        case 'S': case 's': return { 0b00000000, 3 };  // ...
-        case 'T': case 't': return { 0b10000000, 1 };  // -
-        case 'U': case 'u': return { 0b00100000, 3 };  // ..-
-        case 'V': case 'v': return { 0b00010000, 4 };  // ...-
-        case 'W': case 'w': return { 0b01100000, 3 };  // .--
-        case 'X': case 'x': return { 0b10010000, 4 };  // -..-
-        case 'Y': case 'y': return { 0b10110000, 4 };  // -.--
-        case 'Z': case 'z': return { 0b11000000, 4 };  // --..
+    // definition
+    auto transceiverUtils = At86rf215_Utilities();
 
-        // Digits
-        case '0': return { 0b11111000, 5 };
-        case '1': return { 0b01111000, 5 };
-        case '2': return { 0b00111000, 5 };
-        case '3': return { 0b00011000, 5 };
-        case '4': return { 0b00001000, 5 };
-        case '5': return { 0b00000000, 5 };
-        case '6': return { 0b10000000, 5 };
-        case '7': return { 0b11000000, 5 };
-        case '8': return { 0b11100000, 5 };
-        case '9': return { 0b11110000, 5 };
+    static constexpr MorseCodeMapping getMorse(char c) {
+        switch (c) {
+            // Letters (uppercase + lowercase)
+            case 'A': case 'a': return { 0b01000000, 2 };  // .-
+            case 'B': case 'b': return { 0b10000000, 4 };  // -...
+            case 'C': case 'c': return { 0b10100000, 4 };  // -.-.
+            case 'D': case 'd': return { 0b10000000, 3 };  // -..
+            case 'E': case 'e': return { 0b00000000, 1 };  // .
+            case 'F': case 'f': return { 0b00100000, 4 };  // ..-.
+            case 'G': case 'g': return { 0b11000000, 3 };  // --.
+            case 'H': case 'h': return { 0b00000000, 4 };  // ....
+            case 'I': case 'i': return { 0b00000000, 2 };  // ..
+            case 'J': case 'j': return { 0b01110000, 4 };  // .---
+            case 'K': case 'k': return { 0b10100000, 3 };  // -.-
+            case 'L': case 'l': return { 0b01000000, 4 };  // .-..
+            case 'M': case 'm': return { 0b11000000, 2 };  // --
+            case 'N': case 'n': return { 0b10000000, 2 };  // -.
+            case 'O': case 'o': return { 0b11100000, 3 };  // ---
+            case 'P': case 'p': return { 0b01100000, 4 };  // .--.
+            case 'Q': case 'q': return { 0b11010000, 4 };  // --.-
+            case 'R': case 'r': return { 0b01000000, 3 };  // .-.
+            case 'S': case 's': return { 0b00000000, 3 };  // ...
+            case 'T': case 't': return { 0b10000000, 1 };  // -
+            case 'U': case 'u': return { 0b00100000, 3 };  // ..-
+            case 'V': case 'v': return { 0b00010000, 4 };  // ...-
+            case 'W': case 'w': return { 0b01100000, 3 };  // .--
+            case 'X': case 'x': return { 0b10010000, 4 };  // -..-
+            case 'Y': case 'y': return { 0b10110000, 4 };  // -.--
+            case 'Z': case 'z': return { 0b11000000, 4 };  // --..
 
-        // Punctuation
-        case '.': return { 0b01010100, 6 };  // .-.-.-
-        case ',': return { 0b11001100, 6 };  // --..--
-        case '?': return { 0b00110000, 6 };  // ..--..
-        case '\'': return { 0b01111000, 6 };  // .----.
-        case '!': return { 0b10101100, 6 };  // -.-.--
-        case '/': return { 0b10010000, 5 };   // -..-.
-        case '(': return { 0b10110000, 5 };   // -.--.
-        case ')': return { 0b10110100, 6 };   // -.--.-
-        case '&': return { 0b01000000, 5 };   // .-...
-        case ':': return { 0b11100000, 6 };   // ---...
-        case ';': return { 0b10101000, 6 };   // -.-.-.
-        case '=': return { 0b10001000, 5 };   // -...-
-        case '+': return { 0b01010000, 5 };   // .-.-.
-        case '-': return { 0b10000100, 6 };   // -....-
-        case '_': return { 0b00110100, 6 };   // ..--.-
-        case '"': return { 0b01001000, 6 };   // .-..-.
-        case '$': return { 0b00010010, 8 };   // ...-..-
-        case '@': return { 0b01101000, 6 };   // .--.-.
+            // Digits
+            case '0': return { 0b11111000, 5 };
+            case '1': return { 0b01111000, 5 };
+            case '2': return { 0b00111000, 5 };
+            case '3': return { 0b00011000, 5 };
+            case '4': return { 0b00001000, 5 };
+            case '5': return { 0b00000000, 5 };
+            case '6': return { 0b10000000, 5 };
+            case '7': return { 0b11000000, 5 };
+            case '8': return { 0b11100000, 5 };
+            case '9': return { 0b11110000, 5 };
 
-        default:
-            return { 0, 0 };  // not found
+            // Punctuation
+            case '.': return { 0b01010100, 6 };  // .-.-.-
+            case ',': return { 0b11001100, 6 };  // --..--
+            case '?': return { 0b00110000, 6 };  // ..--..
+            case '\'': return { 0b01111000, 6 };  // .----.
+            case '!': return { 0b10101100, 6 };  // -.-.--
+            case '/': return { 0b10010000, 5 };   // -..-.
+            case '(': return { 0b10110000, 5 };   // -.--.
+            case ')': return { 0b10110100, 6 };   // -.--.-
+            case '&': return { 0b01000000, 5 };   // .-...
+            case ':': return { 0b11100000, 6 };   // ---...
+            case ';': return { 0b10101000, 6 };   // -.-.-.
+            case '=': return { 0b10001000, 5 };   // -...-
+            case '+': return { 0b01010000, 5 };   // .-.-.
+            case '-': return { 0b10000100, 6 };   // -....-
+            case '_': return { 0b00110100, 6 };   // ..--.-
+            case '"': return { 0b01001000, 6 };   // .-..-.
+            case '$': return { 0b00010010, 8 };   // ...-..-
+            case '@': return { 0b01101000, 6 };   // .--.-.
+
+            default:
+                return { 0, 0 };  // not found
+        }
     }
-}
-
 
     /** =========== Driver's public interface  =========== **/
+    void At86rf215_Utilities::initializeResources(SPI_HandleTypeDef* spiHandle) {
+        hspi = spiHandle;
+
+        userRequest09 = UserRequest::NO_REQUEST;
+        userRequest24 = UserRequest::NO_REQUEST;
+        energy_measurement09 = 0;
+        energy_measurement24 = 0;
+        received_packet_length09 = 0;
+        received_packet_length24 = 0;
+
+        // Initialize the mutex and the event group
+        resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
+        eventGroupHandle = xEventGroupCreateStatic(&eventGroupBuffer);
+
+        if (resourcesMutexHandle == nullptr || eventGroupHandle == nullptr) {
+            LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphore or event group";
+        }
+
+        // Set the default configuration structures
+        setGeneralConfig();
+        setRXConfig();
+        setTXConfig();
+        setBaseBandCoreConfig();
+        setFrequencySynthesizerConfig();
+        setExternalFrontEndControlConfig();
+        setInterruptConfig();
+        setRadioInterruptConfig();
+        setIQInterfaceConfig();
+
+        Error err = Error::NO_ERRORS;
+        setup(err);
+        if (err != Error::NO_ERRORS) {
+            LOG_ERROR << "[AT86RF215 Driver] Failed to setup AT86RF215";
+        }
+
+        // Set the transceiver as available
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+    }
 
     State At86rf215_Utilities::get_state(Transceiver transceiver, Error& err) {
         if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
@@ -108,10 +148,20 @@ static constexpr MorseCodeMapping getMorse(char c) {
     }
 
     void At86rf215_Utilities::chip_reset(Error& error) {
+        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit,
+        pdFALSE, pdTRUE, pdMS_TO_TICKS(mutexTimeout)) &
+        (transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit) == false) {
+            error = Error::ONGOING_TRANSMISSION_RECEPTION;
+            return;
+        }
+
         if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
             error = Error::RESOURCE_MUTEX_TIMEOUT;
             return;
         }
+
+        // make the transceiver unavailable
+        xEventGroupClearBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
 
         // Chip reset
         spi_write_8(RegisterAddress::RF_RST, 0x07, error);
@@ -125,6 +175,8 @@ static constexpr MorseCodeMapping getMorse(char c) {
         // Restores the current config settings
         setup(error);
 
+        // free up transceiver
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
         xSemaphoreGive(resourcesMutexHandle);
     }
 
@@ -2291,6 +2343,4 @@ static constexpr MorseCodeMapping getMorse(char c) {
         uint16_t received_length = (static_cast<uint16_t>(high_length_byte) << 8) | low_length_byte;
         return received_length;
     }
-
-    At86rf215_Utilities transceiverUtils = At86rf215_Utilities();
 } // namespace AT86RF215

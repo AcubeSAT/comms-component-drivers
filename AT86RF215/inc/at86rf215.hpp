@@ -52,10 +52,12 @@ namespace AT86RF215 {
         EventGroupHandle_t eventGroupHandle;
 
         /// "External" event group bits. The user must trigger these events from the proper ISR or freertos task
+        /// * The logic is "backwards" (1 for unoccupied), since some functions need to wait for the transceiver to become
+        ///   available, using xEventGroupWaitBits().
         const uint32_t spiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
         const uint32_t spiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
-        const uint32_t transceiverUnoccupied09GroupBit     = 1U << 2; // indicates that the sub GHz radio is free to use
-        const uint32_t transceiverUnoccupied24GroupBit     = 1U << 3; // indicates that the 2.4 GHz radio is free to use
+        const uint32_t transceiverUnoccupied09GroupBit     = 1U << 2; // Indicates that the sub GHz radio is free to use *
+        const uint32_t transceiverUnoccupied24GroupBit     = 1U << 3; // indicates that the 2.4 GHz radio is free to use *
         const uint32_t iqEecTransmissionComplete09GroupBit = 1U << 4; // completion of tx using I/Q interface with embedded control
         const uint32_t iqPreambleReception09GroupBit       = 1U << 5; // reception of a preamble using the I/Q interface
         const uint32_t iqPacketReception09GroupBit         = 1U << 6; // full reception of a packet using the I/Q interface
@@ -89,43 +91,13 @@ namespace AT86RF215 {
         bool ReceiverFrameEnd_flag = false;
         bool ReceiverFrameStart_flag = false;
 
+
+        At86rf215_Utilities() = default;
+
         /**
          * Initializer for AT86RF215 driver
          */
-        At86rf215_Utilities()
-                : userRequest09(UserRequest::NO_REQUEST), userRequest24(UserRequest::NO_REQUEST),
-                  energy_measurement09(0), energy_measurement24(0), received_packet_length09(0),
-                  received_packet_length24(0) {
-
-
-            // Initialize the mutex and the event group
-            resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
-            eventGroupHandle = xEventGroupCreateStatic(&eventGroupBuffer);
-
-            if (resourcesMutexHandle == nullptr || eventGroupHandle == nullptr) {
-                LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphore or event group";
-            }
-
-            // Set the default configuration structures
-            setGeneralConfig();
-            setRXConfig();
-            setTXConfig();
-            setBaseBandCoreConfig();
-            setFrequencySynthesizerConfig();
-            setExternalFrontEndControlConfig();
-            setInterruptConfig();
-            setRadioInterruptConfig();
-            setIQInterfaceConfig();
-        }
-
-        /**
-         * Register SPI handle, and setup the transceiver.
-         * @warning The user should always call this before using any of the driver methods.
-         */
-        void registerTransceiver(SPI_HandleTypeDef* handle, Error err = Error::NO_ERRORS) {
-            hspi = handle;
-            setup(err);
-        }
+        void initializeResources(SPI_HandleTypeDef* spiHandle);
 
         /**
          * This method reads the transceiver interrupt code and takes any necessary actions.
@@ -137,8 +109,8 @@ namespace AT86RF215 {
         void handle_irq(Error &err);
 
         /**
-         * Update the configuration structures. For the changes to apply, a subsequent call to chip_reset() is
-         * required.
+         * Update the configuration structures.
+         * @warning For the changes to apply, a subsequent call to chip_reset() is required.
          */
         void setGeneralConfig(GeneralConfiguration&& GeneralConfig = GeneralConfiguration::DefaultGeneralConfig()) {
             generalConfig = std::move(GeneralConfig);
