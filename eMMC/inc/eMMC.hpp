@@ -21,7 +21,10 @@ namespace eMMC {
         EMMC_BUFFER_TOO_SMALL,
         EMMC_QUEUE_FULL,
         EMMC_QUEUE_EMPTY,
-        EMMC_INVALID_NUMBER_OF_ITEMS
+        EMMC_INVALID_NUMBER_OF_ITEMS,
+        EMMC_FREERTOS_RESOURCE_INITIALIZATION_FAILED,
+        EMMC_SPECIFIED_ZERO_LENGTH_OBJECT,
+        EMMC_SURPASSED_MEMORY_CONSTRAINTS
     };
 
     /**
@@ -62,14 +65,14 @@ namespace eMMC {
          */
          SemaphoreHandle_t isrTriggeredSemaphoreHandle;
 
-        explicit eMMC_Utilities();
+        eMMC_Utilities() = default;
 
         /**
-         * @warning This method must be called before using the driver.
+         * Initializer for the eMMC driver
+         *
+         * @returns The percentage of allocated memory
          */
-        void registerMMC(MMC_HandleTypeDef* handle) {
-            hmmc = handle;
-        }
+        etl::expected<float, Error> initializeResources(MMC_HandleTypeDef* handle);
 
         /** Memory item interface**/
 

@@ -3,12 +3,17 @@
 #include "Logger.hpp"
 
 namespace eMMC {
-    eMMC_Utilities::eMMC_Utilities() {
+    // definition
+    eMMC_Utilities eMMC_Utils = eMMC_Utilities();
+
+    etl::expected<float, Error> eMMC_Utilities::initializeResources(MMC_HandleTypeDef* handle) {
+        hmmc = handle;
+
         eMMC_semaphoreHandle = xSemaphoreCreateMutexStatic(&eMMC_semaphoreBuffer);
         isrTriggeredSemaphoreHandle = xSemaphoreCreateBinaryStatic(&isrTriggeredSemaphoreBuffer);
 
         if (eMMC_semaphoreHandle == nullptr || isrTriggeredSemaphoreHandle == nullptr) {
-            LOG_ERROR << "[EMMC Driver] Failed to create mutex or semaphore";
+            return etl::unexpected(Error::EMMC_FREERTOS_RESOURCE_INITIALIZATION_FAILED);
         }
 
         // Initialize the memoryMap array using the sizes from MemoryItems.def
@@ -20,7 +25,7 @@ namespace eMMC {
         uint64_t headBlockPointer = 0;
         for (uint8_t i = 0; i < memoryItemCount; i++) {
             if (memoryItemMap[i].size == 0) {
-                LOG_ERROR << "[EMMC Driver] Inserted item with 0 length!";
+                return etl::unexpected(Error::EMMC_SPECIFIED_ZERO_LENGTH_OBJECT);
             }
 
             memoryItemMap[i].startBlockAddress = headBlockPointer;
@@ -28,8 +33,7 @@ namespace eMMC {
             headBlockPointer += memoryItemMap[i].size / blockSize + static_cast<uint64_t>(memoryItemMap[i].hasPartialBlock); // points one block past the end address
 
             if (headBlockPointer > static_cast<uint64_t>(blockCount)) {
-                LOG_ERROR << "[EMMC Driver] Failed to allocate memory sections. Surpassed memory constraints!";
-                return;
+                return etl::unexpected(Error::EMMC_SURPASSED_MEMORY_CONSTRAINTS);
             }
             memoryItemMap[i].endBlockAddress = headBlockPointer - 1;
             memoryItemMap[i].semaphoreHandle = xSemaphoreCreateMutexStatic(&memoryItemMap[i].semaphoreBuffer);
@@ -43,7 +47,7 @@ namespace eMMC {
         // Calculate QueueHandler parameters
         for (uint8_t i = 0; i < memoryQueueCount; i++) {
             if (memoryQueueMap[i].itemSize == 0 || memoryQueueMap[i].maxNumberOfItems == 0) {
-                LOG_ERROR << "[EMMC Driver] Inserted queue with item size or queue length of 0!";
+                return etl::unexpected(Error::EMMC_SPECIFIED_ZERO_LENGTH_OBJECT);
             }
 
             memoryQueueMap[i].itemHasPartialBlock = memoryQueueMap[i].itemSize % blockSize;
@@ -52,14 +56,14 @@ namespace eMMC {
             headBlockPointer += memoryQueueMap[i].slotBlockSize * memoryQueueMap[i].maxNumberOfItems; // points one block past the end address
 
             if (headBlockPointer > static_cast<uint64_t>(blockCount)) {
-                LOG_ERROR << "[EMMC Driver] Failed to allocate memory sections. Surpassed memory constraints!";
-                return;
+                return etl::unexpected(Error::EMMC_SURPASSED_MEMORY_CONSTRAINTS);
             }
             memoryQueueMap[i].endBlockAddress = headBlockPointer - 1;
             memoryQueueMap[i].semaphoreHandle = xSemaphoreCreateMutexStatic(&memoryQueueMap[i].semaphoreBuffer);
         }
 
         emmcUsage = 100 * static_cast<float>(headBlockPointer-1) / blockCount;
+        return emmcUsage;
     }
 
     etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, uint8_t* destBuffer, const uint32_t bufferSize, const uint32_t startBlock, const uint32_t numOfBlocks) {
@@ -420,6 +424,4 @@ namespace eMMC {
         xSemaphoreGive(eMMC_semaphoreHandle);
         return {}; // success
     }
-
-    eMMC_Utilities eMMC_Utils = eMMC_Utilities();
 } // namespace eMMC
