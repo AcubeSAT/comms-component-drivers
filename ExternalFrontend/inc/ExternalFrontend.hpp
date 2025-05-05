@@ -23,24 +23,13 @@ namespace ExternalFrontend {
      */
     class ExternalFrontendUtilities {
     public:
-         /**
-          * @note All chains will be set to inactive by default.
-          * @param hadcTemp Handler to ADC peripheral for AGC temperature conversion.
-          */
-         ExternalFrontendUtilities():
-             txUhfActive(false), rxUhfActive(false), sbandActive(false) {
-             HAL_GPIO_WritePin(EN_PA_UHF_GPIO_Port, EN_PA_UHF_Pin, GPIO_PIN_SET);
-             HAL_GPIO_WritePin(EN_UHF_AMP_RX__GPIO_Port, EN_UHF_AMP_RX__Pin, GPIO_PIN_RESET);
-             HAL_GPIO_WritePin(EN_RX_UHF_GPIO_Port, EN_RX_UHF_Pin, GPIO_PIN_SET);
-             HAL_GPIO_WritePin(EN_S_BAND_TX_GPIO_Port, EN_S_BAND_TX_Pin, GPIO_PIN_SET);
-         }
+        ExternalFrontendUtilities() = default;
 
-        void registerHandles(ADC_HandleTypeDef* hadc_Temp, ADC_HandleTypeDef* hadc_OutVoltAgc,
-                                   DAC_HandleTypeDef* hdac_SetpointVoltage) {
-             hadcTemp = hadc_Temp;
-             hadcOutVoltAgc = hadc_Temp;
-             hdacSetpointVoltage = hdac_SetpointVoltage;
-        }
+        /**
+         * @note All chains will be set to inactive by default.
+         */
+        void initializeResources(ADC_HandleTypeDef* hadc_Temp, ADC_HandleTypeDef* hadc_OutVoltAgc,
+                                  DAC_HandleTypeDef* hdac_SetpointVoltage);
 
         [[nodiscard]] bool getAgcSwitchedIn() const {
             return agcSwitchedIn;
