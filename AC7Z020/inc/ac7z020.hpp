@@ -15,7 +15,8 @@ namespace AC7Z020 {
         FAILED_READING_FROM_FPGA,
         RESOURCE_MUTEX_TIMEOUT,
         INVALID_IRQ_CODE,
-        INVALID_LENGTH
+        INVALID_LENGTH,
+        FREERTOS_RESOURCE_INITIALIZATION_FAILED,
     };
 
     class AC7Z020_Utilities {
@@ -28,23 +29,9 @@ namespace AC7Z020 {
         /**
          * Initializer for AC7Z020 driver
          */
-        AC7Z020_Utilities() {
-            resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
-            spiWriteCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiWriteCompleteSemaphoreBuffer);
-            spiReadCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiReadCompleteSemaphoreBuffer);
-            if (resourcesMutexHandle == nullptr ||
-                spiWriteCompleteSemaphoreHandle == nullptr ||
-                spiReadCompleteSemaphoreHandle == nullptr) {
-                LOG_ERROR << "[AC7Z020 Driver] Failed to create semaphores";
-            }
-        }
+        AC7Z020_Utilities() = default;
 
-        /**
-         * @warning Do not use the driver before calling this function.
-         */
-        void registerSPIHandle(SPI_HandleTypeDef* handle) {
-            hspi = handle;
-        }
+        etl::expected<void, Error> initializeResources(SPI_HandleTypeDef* spiHandle);
 
         /**
          * Read irq register
