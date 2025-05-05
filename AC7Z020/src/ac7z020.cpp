@@ -2,6 +2,22 @@
 #include "main.h"
 
 namespace AC7Z020 {
+    // definition
+    AC7Z020_Utilities ac7z020Utils = AC7Z020_Utilities();
+
+    etl::expected<void, Error> AC7Z020_Utilities::initializeResources(SPI_HandleTypeDef* spiHandle) {
+        hspi = spiHandle;
+
+        resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
+        spiWriteCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiWriteCompleteSemaphoreBuffer);
+        spiReadCompleteSemaphoreHandle = xSemaphoreCreateBinaryStatic(&spiReadCompleteSemaphoreBuffer);
+        if (resourcesMutexHandle == nullptr ||
+            spiWriteCompleteSemaphoreHandle == nullptr ||
+            spiReadCompleteSemaphoreHandle == nullptr) {
+            return etl::unexpected(Error::FREERTOS_RESOURCE_INITIALIZATION_FAILED);
+        }
+        return {};
+    }
 
     etl::expected<void, Error> AC7Z020_Utilities::spi_block_write_8(uint16_t regAddress, uint8_t* sourceBuff, uint16_t numBytes) {
         uint8_t msg[2] = {static_cast<uint8_t>(0x80 | ((regAddress >> 8) & 0x7F)), static_cast<uint8_t>(regAddress & 0xFF)};
