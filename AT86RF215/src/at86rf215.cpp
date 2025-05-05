@@ -103,6 +103,14 @@ namespace AT86RF215 {
         setRadioInterruptConfig();
         setIQInterfaceConfig();
 
+        set_state_private(RF09, State::RF_TRXOFF, error);
+        if (error != Error::NO_ERRORS) {
+            return;
+        }
+        set_state_private(RF24, State::RF_TRXOFF, error);
+        if (error != Error::NO_ERRORS) {
+            return;
+        }
         setup(error);
         if (error != Error::NO_ERRORS) {
             return;
@@ -168,7 +176,15 @@ namespace AT86RF215 {
         spi_read_8(RegisterAddress::BBC0_IRQS, error);
         spi_read_8(RegisterAddress::BBC1_IRQS, error);
 
-        // Restores the current config settings
+        // Restore the current config settings
+        set_state_private(RF09, State::RF_TRXOFF, error);
+        if (error != Error::NO_ERRORS) {
+            return;
+        }
+        set_state_private(RF24, State::RF_TRXOFF, error);
+        if (error != Error::NO_ERRORS) {
+            return;
+        }
         setup(error);
 
         // free up transceiver
@@ -599,6 +615,7 @@ namespace AT86RF215 {
         }
         set_state_private(transceiver, State::RF_TXPREP, err);
         xSemaphoreGive(resourcesMutexHandle);
+        vTaskDelay(pdMS_TO_TICKS(10));
 
         const auto timeUnit = static_cast<uint16_t>(1200 / wpm);
         for (uint16_t i = 0; i < sequenceLen; i++) {
@@ -763,14 +780,20 @@ namespace AT86RF215 {
                 break;
 
             case Error::TRANSMISSION_FAILED:
-                LOG_ERROR << "BASEBAND_TRANSMISSION_FAILED";
+                LOG_ERROR << "TRANSMISSION_FAILED";
+                break;
 
             case Error::RECEPTION_FAILED:
-                LOG_ERROR << "BASEBAND_RECEPTION_FAILED";
+                LOG_ERROR << "RECEPTION_FAILED";
+                break;
 
             case Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED:
                 LOG_ERROR << "SINGLE_SHOT_MEASUREMENT_FAILED";
+                break;
 
+            case Error::FREERTOS_RESOURCE_INITIALIZATION_FAILED:
+                LOG_ERROR << "SINGLE_SHOT_MEASUREMENT_FAILED";
+                break;
             default:
                 LOG_ERROR << "UNHANDLED_ERROR";
                 break;
@@ -1003,13 +1026,19 @@ namespace AT86RF215 {
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
         uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, msg, 3);
 
-        if (hal_error != HAL_OK ||
-            xEventGroupWaitBits(eventGroupHandle,
-                                spiWriteCompleteGroupBit,
-                                pdTRUE, pdTRUE,
-                                mutexTimeout) != pdTRUE) {
+        if (hal_error != HAL_OK) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
-            err = Error::FAILED_WRITING_TO_REGISTER;
+            err = Error::FAILED_READING_FROM_REGISTER;
+            return;
+        }
+
+        uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
+                            spiWriteCompleteGroupBit,
+                            pdTRUE, pdTRUE,
+                            pdMS_TO_TICKS(mutexTimeout));
+        if (!(eventBits & spiWriteCompleteGroupBit)) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
 
@@ -1023,11 +1052,17 @@ namespace AT86RF215 {
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
         uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, 3);
 
-        if (hal_error != HAL_OK ||
-            xEventGroupWaitBits(eventGroupHandle,
+        if (hal_error != HAL_OK) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            err = Error::FAILED_READING_FROM_REGISTER;
+            return 0;
+        }
+
+        uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
                             spiReadCompleteGroupBit,
                             pdTRUE, pdTRUE,
-                            mutexTimeout) != pdTRUE) {
+                            pdMS_TO_TICKS(mutexTimeout));
+        if (!(eventBits & spiReadCompleteGroupBit)) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return 0;
@@ -1045,29 +1080,40 @@ namespace AT86RF215 {
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
 
         uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, msg, 2);
-        if (hal_error != HAL_OK ||
-            xEventGroupWaitBits(eventGroupHandle,
+        if (hal_error != HAL_OK) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            err = Error::FAILED_READING_FROM_REGISTER;
+            return;
+        }
+
+        uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
                             spiWriteCompleteGroupBit,
                             pdTRUE, pdTRUE,
-                            mutexTimeout) != pdTRUE) {
+                            pdMS_TO_TICKS(mutexTimeout));
+        if (!(eventBits & spiWriteCompleteGroupBit)) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
-            err = Error::FAILED_WRITING_TO_REGISTER;
+            err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
 
         hal_error = HAL_SPI_Transmit_DMA(hspi, value, n);
-        if (hal_error != HAL_OK ||
-            xEventGroupWaitBits(eventGroupHandle,
+        if (hal_error != HAL_OK) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            err = Error::FAILED_READING_FROM_REGISTER;
+            return;
+        }
+
+        eventBits = xEventGroupWaitBits(eventGroupHandle,
                             spiWriteCompleteGroupBit,
                             pdTRUE, pdTRUE,
-                            mutexTimeout) != pdTRUE) {
+                            pdMS_TO_TICKS(mutexTimeout));
+        if (!(eventBits & spiWriteCompleteGroupBit)) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
-            err = Error::FAILED_WRITING_TO_REGISTER;
+            err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
 
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
-
         err = Error::NO_ERRORS;
     }
 
@@ -1077,14 +1123,20 @@ namespace AT86RF215 {
 
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
         uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, n + 2);
-        if (hal_error != HAL_OK ||
-        xEventGroupWaitBits(eventGroupHandle,
-                            spiReadCompleteGroupBit,
-                            pdTRUE, pdTRUE,
-                            mutexTimeout) != pdTRUE) {
+        if (hal_error != HAL_OK) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
-            return response;
+            return nullptr;
+        }
+
+        uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
+                            spiReadCompleteGroupBit,
+                            pdTRUE, pdTRUE,
+                            pdMS_TO_TICKS(mutexTimeout));
+        if (!(eventBits & spiReadCompleteGroupBit)) {
+            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            err = Error::FAILED_READING_FROM_REGISTER;
+            return nullptr;
         }
 
         HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
@@ -1139,7 +1191,7 @@ namespace AT86RF215 {
                 }
                 break;
             case State::RF_NOP:
-                break;
+                [[fallthrough]]
             case State::RF_RESET:
                 break;
             case State::RF_SLEEP:
