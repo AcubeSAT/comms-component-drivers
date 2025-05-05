@@ -40,6 +40,7 @@ namespace AT86RF215 {
         TRANSMISSION_FAILED,
         RECEPTION_FAILED,
         SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED,
+        FREERTOS_RESOURCE_INITIALIZATION_FAILED,
     };
 
     inline uint8_t operator&(const uint8_t a, InterruptMask b) {
@@ -97,7 +98,7 @@ namespace AT86RF215 {
         /**
          * Initializer for AT86RF215 driver
          */
-        void initializeResources(SPI_HandleTypeDef* spiHandle);
+        void initializeResources(SPI_HandleTypeDef* spiHandle, Error error);
 
         /**
          * This method reads the transceiver interrupt code and takes any necessary actions.

@@ -8,7 +8,7 @@
 
 namespace AT86RF215 {
     // definition
-    auto transceiverUtils = At86rf215_Utilities();
+    At86rf215_Utilities transceiverUtils = At86rf215_Utilities();
 
     static constexpr MorseCodeMapping getMorse(char c) {
         switch (c) {
@@ -78,7 +78,7 @@ namespace AT86RF215 {
     }
 
     /** =========== Driver's public interface  =========== **/
-    void At86rf215_Utilities::initializeResources(SPI_HandleTypeDef* spiHandle) {
+    void At86rf215_Utilities::initializeResources(SPI_HandleTypeDef* spiHandle, Error error) {
         hspi = spiHandle;
 
         userRequest09 = UserRequest::NO_REQUEST;
@@ -93,7 +93,8 @@ namespace AT86RF215 {
         eventGroupHandle = xEventGroupCreateStatic(&eventGroupBuffer);
 
         if (resourcesMutexHandle == nullptr || eventGroupHandle == nullptr) {
-            LOG_ERROR << "[AT86RF215 Driver] Failed to create semaphore or event group";
+            error = Error::FREERTOS_RESOURCE_INITIALIZATION_FAILED;
+            return;
         }
 
         // Set the default configuration structures
@@ -107,14 +108,14 @@ namespace AT86RF215 {
         setRadioInterruptConfig();
         setIQInterfaceConfig();
 
-        Error err = Error::NO_ERRORS;
-        setup(err);
-        if (err != Error::NO_ERRORS) {
-            LOG_ERROR << "[AT86RF215 Driver] Failed to setup AT86RF215";
+        setup(error);
+        if (error != Error::NO_ERRORS) {
+            return;
         }
 
         // Set the transceiver as available
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        error = Error::NO_ERRORS;
     }
 
     State At86rf215_Utilities::get_state(Transceiver transceiver, Error& err) {
