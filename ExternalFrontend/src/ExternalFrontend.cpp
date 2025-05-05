@@ -5,6 +5,25 @@
 
 #include "Task.hpp"
 namespace ExternalFrontend {
+    // definition
+    ExternalFrontendUtilities externalFrontendUtils = ExternalFrontend::ExternalFrontendUtilities();
+
+    void ExternalFrontendUtilities::initializeResources(ADC_HandleTypeDef* hadc_Temp, ADC_HandleTypeDef* hadc_OutVoltAgc,
+                                  DAC_HandleTypeDef* hdac_SetpointVoltage) {
+        txUhfActive = false;
+        rxUhfActive = false;
+        sbandActive = false;
+
+        hadcTemp = hadc_Temp;
+        hadcOutVoltAgc = hadc_OutVoltAgc;
+        hdacSetpointVoltage = hdac_SetpointVoltage;
+
+        HAL_GPIO_WritePin(EN_PA_UHF_GPIO_Port, EN_PA_UHF_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(EN_UHF_AMP_RX__GPIO_Port, EN_UHF_AMP_RX__Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(EN_RX_UHF_GPIO_Port, EN_RX_UHF_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(EN_S_BAND_TX_GPIO_Port, EN_S_BAND_TX_Pin, GPIO_PIN_SET);
+    }
+
     void ExternalFrontendUtilities::enableExternalFrontend(const ExternalFrontendChain chain, bool agcSwitchedIn) {
         switch (chain) {
             case ExternalFrontendChain::TX_UHF:
@@ -93,11 +112,11 @@ namespace ExternalFrontend {
     bool ExternalFrontendUtilities:: readOutVoltageAGC() {
         // Calibrate peripheral for better accuracy
         if (HAL_ADCEx_Calibration_Start(hadcOutVoltAgc, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-            return {};
+            return false;
         }
 
         if (HAL_ADC_PollForConversion(hadcOutVoltAgc, outVoltAGCConversionMaxDelayMs) != HAL_OK) {
-            return {};
+            return false;
         }
 
         voltageBufferOutVoltAGC = HAL_ADC_GetValue(hadcOutVoltAgc);
@@ -147,6 +166,4 @@ namespace ExternalFrontend {
         HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_RESET);
         return true;
     }
-
-    ExternalFrontendUtilities externalFrontendUtils = ExternalFrontendUtilities();
 } // namespace ExternalFrontend
