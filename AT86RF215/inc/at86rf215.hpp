@@ -98,7 +98,7 @@ namespace AT86RF215 {
         /**
          * Initializer for AT86RF215 driver
          */
-        void initializeResources(SPI_HandleTypeDef* spiHandle, Error error);
+        void initializeResources(SPI_HandleTypeDef* spiHandle, Error& error);
 
         /**
          * This method reads the transceiver interrupt code and takes any necessary actions.
