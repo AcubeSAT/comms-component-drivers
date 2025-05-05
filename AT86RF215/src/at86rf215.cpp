@@ -1,9 +1,4 @@
 #include "at86rf215.hpp"
-
-#include <map>
-#include <SbandTxTask.hpp>
-#include <etl/flat_map.h>
-
 #include "Task.hpp"
 
 namespace AT86RF215 {
@@ -78,7 +73,7 @@ namespace AT86RF215 {
     }
 
     /** =========== Driver's public interface  =========== **/
-    void At86rf215_Utilities::initializeResources(SPI_HandleTypeDef* spiHandle, Error error) {
+    void At86rf215_Utilities::initializeResources(SPI_HandleTypeDef* spiHandle, Error& error) {
         hspi = spiHandle;
 
         userRequest09 = UserRequest::NO_REQUEST;
