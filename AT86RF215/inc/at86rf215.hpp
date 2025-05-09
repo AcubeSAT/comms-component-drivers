@@ -2,6 +2,7 @@
 
 #include <utility>
 #include <cstdint>
+#include <etl/optional.h>
 
 #include "etl/expected.h"
 #include "FreeRTOS.h"
@@ -36,11 +37,13 @@ namespace AT86RF215 {
         INVALID_RSSI_MEASUREMENT,
         INVALID_AGC_CONTROl_WORD,
         ONGOING_TRANSMISSION_RECEPTION,
-        RESOURCE_MUTEX_TIMEOUT,
+        SPI_ACCESS_MUTEX_TIMEOUT,
         TRANSMISSION_FAILED,
         RECEPTION_FAILED,
         SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED,
         FREERTOS_RESOURCE_INITIALIZATION_FAILED,
+        INVALID_CHIP_MODE,
+        RX_WAIT_TIMEOUT,
     };
 
     inline uint8_t operator&(const uint8_t a, InterruptMask b) {
@@ -49,30 +52,29 @@ namespace AT86RF215 {
 
     class At86rf215_Utilities {
     public:
-        /// Event group for signaling various events
+        /// Event group for signaling various events. Look in "at86rf215definitions" for interpretation
+        /// of each group bit
         EventGroupHandle_t eventGroupHandle;
 
-        /// "External" event group bits. The user must trigger these events from the proper ISR or freertos task
-        /// * The logic is "backwards" (1 for unoccupied), since some functions need to wait for the transceiver to become
-        ///   available, using xEventGroupWaitBits().
-        const uint32_t spiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
-        const uint32_t spiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
-        const uint32_t transceiverUnoccupied09GroupBit     = 1U << 2; // Indicates that the sub GHz radio is free to use *
-        const uint32_t transceiverUnoccupied24GroupBit     = 1U << 3; // indicates that the 2.4 GHz radio is free to use *
-        const uint32_t iqEecTransmissionComplete09GroupBit = 1U << 4; // completion of tx using I/Q interface with embedded control
-        const uint32_t iqPreambleReception09GroupBit       = 1U << 5; // reception of a preamble using the I/Q interface
-        const uint32_t iqPacketReception09GroupBit         = 1U << 6; // full reception of a packet using the I/Q interface
-        const uint32_t iqEecTransmissionComplete24GroupBit = 1U << 7; // completion of tx using I/Q interface with embedded control
-        const uint32_t iqPreambleReception24GroupBit       = 1U << 8; // reception of a preamble using the I/Q interface
-        const uint32_t iqPacketReception24GroupBit         = 1U << 9; // full reception of a packet using the I/Q interface
-
-        /// "Internal" event group bits. Used for communication of certain driver functions with handle_irq()
-        const uint32_t basebandTx09GroupBit          = 1U << 10; // signal finished transmission for sub GHz baseband core
-        const uint32_t basebandTx24GroupBit          = 1U << 11; // signal finished transmission for 2.4 baseband core
-        const uint32_t basebandRx09GroupBit          = 1U << 12; // signal finished reception for sub GHz baseband core
-        const uint32_t basebandRx24GroupBit          = 1U << 13; // signal finished reception for 2.4 GHz baseband core
-        const uint32_t energyDetCompletion09GroupBit = 1U << 14;
-        const uint32_t energyDetCompletion24GroupBit = 1U << 15;
+        /// Define here how long the transceiver should wait for certain events, before throwing an error (milliseconds).
+        const uint16_t spiAccessMutexTimeoutMs = 100;
+        const uint16_t spiByteWriteCompleteDelayMs        = 100;
+        const uint16_t spiByteReadCompleteDelayMs         = 100;
+        const uint16_t transceiverUnoccupied09DelayMs     = 100;
+        const uint16_t transceiverUnoccupied24DelayMs     = 100;
+        const uint16_t iqEecTransmissionComplete09DelayMs = 100;
+        const uint16_t iqPreambleReception09DelayMs       = 10000;
+        const uint16_t iqPacketReception09DelayMs         = 100;
+        const uint16_t iqEecTransmissionComplete24DelayMs = 100;
+        const uint16_t iqPreambleReception24DelayMs       = 10000;
+        const uint16_t iqPacketReception24DelayMs         = 100;
+        const uint16_t transceiverReadyDelayMs            = 100;
+        const uint16_t basebandTx09DelayMs                = 100;
+        const uint16_t basebandTx24DelayMs                = 100;
+        const uint16_t basebandRx09DelayMs                = 10000;
+        const uint16_t basebandRx24DelayMs                = 10000;
+        const uint16_t energyDetCompletion09DelayMs       = 100;
+        const uint16_t energyDetCompletion24DelayMs       = 100;
 
         /// Flags indicating a radio interrupt has occurred (offered for debugging purposes only, must be manually reset)
         bool IFSynchronization_flag = false;
@@ -104,8 +106,6 @@ namespace AT86RF215 {
          * This method reads the transceiver interrupt code and takes any necessary actions.
          * It should be used inside a high priority freertos task, dedicated solely to transceiver irq handling.
          *
-         * @warning This method attempts to take the resources mutex, so it must not be called inside an ISR. Instead,
-         *          the ISR should notify a dedicated irq handling task.
          */
         void handle_irq(Error &err);
 
@@ -183,12 +183,15 @@ namespace AT86RF215 {
         void print_error(Error& err);
 
         /**
-         * Begin operations for measuring energy in the specified bandwidth (single shot measurement)
+         * Single shot measurement of power in the specified bandwidth, around the
+         * set central frequency.
          * @param transceiver       Selected transceiver
          * @param err               Pointer to raised error
+         * @param bw                Power will be measured in this bandwidth. If no value is given, the
+         *                          measurement will take place in the already set bandwidth.
+         * @returns                 The average power in dBm. The range of possible values is -127..4 dBm
          */
-        // TODO: specify bw here
-        int8_t clear_channel_assessment(Transceiver transceiver, Error& err);
+        int8_t clear_channel_assessment(Transceiver transceiver, etl::optional<ReceiverBandwidth> bw, Error& err);
 
         /**
          * Transmit a packet using the baseband core.
@@ -208,15 +211,14 @@ namespace AT86RF215 {
          *
          * @note This function essentially sets the transceiver to state RX, but the user is
          *       not stopped from performing an energy measurement, or a tx operation (either with
-         *       the baseband core or through the I/Q interface), meaning the
-         *       transceiverOccupied event bit is not set until an actual reception occurs. The function
-         *       has to be called again to re-enter the "listening" state.
+         *       the baseband core or through the I/Q interface), after this function returns.
+         *       The function has to be called again to re-enter the "listening" state.
          *
          *
          * @param transceiver		Specifies the transceiver used
          * @param destBuff          A user provided buffer to write the packet. In order to guarantee
          *                          that there will be no buffer overflow, it's capacity should be
-         *                          at least 2047 (the maximum possible packet length)
+         *                          at least 2047 (the maximum supported packet length)
          * @param err				Pointer to raised error
          */
         void preparePacketReceptionBaseband(Transceiver transceiver, uint8_t* destBuff, Error &err);
@@ -225,11 +227,14 @@ namespace AT86RF215 {
          * Waits for packet reception. The packet is written to the registered buffer from
          * the preparePacketReceptionBaseband() call.
          *
-         * @note The actual copying of the reception packet happens in handle_irq(), when a receiver frame
-         *       end interrupt arrives. All this function does is wait for an event,
-         *       which is sent by handle_irq() when said copying is finished.
+         * @note The actual copying of the reception packet happens in handle_irq(), when a "receiver frame
+         *       end interrupt" arrives. All this function does is return the packet length, once the reception is
+         *       complete.
          *
-         * @returns The received packet length
+         * @note The function may return with a RX_WAIT_TIMEOUT error. This does not indicate that
+         *       something went wrong in the process, just that the defined timeout period has ended.
+         *
+         * @returns The received packet length. In case of an error, 0 is returned.
          */
         uint16_t waitForPacketReceptionBaseband(Transceiver transceiver, Error &err);
 
@@ -241,10 +246,17 @@ namespace AT86RF215 {
          *       the transceiver is automatically  set to state TX, by the external baseband processor.
          *       This is achieved by sending I_DATA[0] == 1 through the I/Q interface (@see figure 7.6 of datasheet).
          *
+         * @warning There is only a single I/Q interface for sending packets, shared between radios. This means
+         *          that for the chip mode RF_BBRF, the other radio CANNOT be used during transmission and should
+         *          remain in state RF_TRXOFF. Therefore, this function will lock BOTH radios in such a scenario.
+         *
          */
         void prepareForPacketTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err);
 
         /**
+         * Wait for the transmission to end and unlock the radio (if the chip mode is set to RF_BBRF, also
+         * unlock the other radio)
+         *
          * @note The user needs to set the iqEecTransmissionComplete event bit immediately after the
          *    baseband processor finishes the TX operation, so that the transceiver occupied flag is reset.
          */
@@ -273,9 +285,28 @@ namespace AT86RF215 {
          *
          *    - set the iqPacketReception event bit once the external baseband processor fully received the
          *      packet, so that the AGC is released and the transceiverOccupied event bit is reset
+         *
+         * @note The function may return with a RX_WAIT_TIMEOUT error. This does not indicate that
+         *        something went wrong in the process, just that the defined timeout period has ended.
          */
         void waitForPacketReceptionIQ(Transceiver transceiver, Error& err);
 
+        /**
+         * DEBUG FUNCTION: Set the transceiver to a state where incoming data in the LDVS interface is looped back
+         *                 (directly from the receiver, TXD, to the RX09 and RX24 drivers). There is a delay of
+         *                 up to 18 "bit periods" between the incoming and the looped back data streams.
+         *
+         * @note For the IQ interface to work, any chip mode that is not RF_MODE_BBRF should be selected:
+         *               RF_MODE_RF:  I/Q IF enabled
+         *               RF_MODE_BBRF09: I/Q IF enabled (sub 1GHz)
+         *               RF_MODE_BBRF24: I/Q IF enabled (2.4GHz)
+         */
+        void enableIQLoopbackMode(Error& err);
+
+        /**
+         * DEBUG FUNCTION: Disable LVDS interface loopback.
+         */
+        void disableIQLoopbackMode(Error& err);
         /**
          * Transmit a sequence of characters encoded as morse code, with on-off keying modulation (OOK).
          * This is achieved using the "DAC overwrite"  features (section 13.1.2), which allows transmission
@@ -296,11 +327,8 @@ namespace AT86RF215 {
 
     private:
         /// Mutex for concurrent access protection
-        StaticSemaphore_t resourcesMutexBuffer = {};
-        SemaphoreHandle_t resourcesMutexHandle;
-        uint16_t mutexTimeout = 100; // in ms
-        // TODO maybe it would be better to use a separate timeout for "time critical"
-        //      procedures (like freezing the AGC) and a less strict one for stuff like reading the drivers parameters
+        StaticSemaphore_t spiAccessMutexBuffer = {};
+        SemaphoreHandle_t spiAccessMutexHandle;
 
         /// Event group for signaling various events
         StaticEventGroup_t eventGroupBuffer;
@@ -319,18 +347,6 @@ namespace AT86RF215 {
         RadioInterruptsConfig radioInterruptsConfig;
         IQInterfaceConfig iqInterfaceConfig;
 
-        enum class UserRequest {
-            BASEBAND_RX,                          // rx with baseband core
-            BASEBAND_TX,                          // tx with baseband core
-            IQ_EEC_TX,                            // tx with I/Q interface, using embedded control
-            IQ_RX,                                // rx with I/Q interface
-            SINGLE_SHOT_ENERGY_MEASUREMENT,       // use frontend to measure energy
-            MORCE_CODE_OOK,                       // transmit a sequence of characters using OOK modulation and morse code
-            NO_REQUEST
-        };
-        UserRequest userRequest09;
-        UserRequest userRequest24;
-
         /// User provided buffer for storing a received packet in baseband core operation
         uint8_t* destBuffer09;
         uint8_t* destBuffer24;
@@ -338,10 +354,6 @@ namespace AT86RF215 {
         /// Received packet's length in baseband core operation
         uint16_t received_packet_length09;
         uint16_t received_packet_length24;
-
-        /// Result of a clear channel assessment is stored here
-        int8_t energy_measurement09;
-        int8_t energy_measurement24;
 
         /**
          * Writes a byte to a specified address

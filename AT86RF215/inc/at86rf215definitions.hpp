@@ -1,6 +1,30 @@
 #pragma once
 
 namespace AT86RF215 {
+    /// "External" event group bits. The user must trigger these events from the proper ISR or freertos task
+    ///  For the transceiver unoccupied group bits the logic is "backwards" (1 for unoccupied), since some
+    ///  functions need to wait for the transceiver to become available, using xEventGroupWaitBits().
+    inline constexpr uint32_t spiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
+    inline constexpr uint32_t spiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
+    inline constexpr uint32_t transceiverUnoccupied09GroupBit     = 1U << 2; // Indicates that the sub GHz radio is free to use *
+    inline constexpr uint32_t transceiverUnoccupied24GroupBit     = 1U << 3; // indicates that the 2.4 GHz radio is free to use *
+    inline constexpr uint32_t iqEecTransmissionComplete09GroupBit = 1U << 4; // completion of tx using I/Q interface with embedded control
+    inline constexpr uint32_t iqPreambleReception09GroupBit       = 1U << 5; // reception of a preamble using the I/Q interface
+    inline constexpr uint32_t iqPacketReception09GroupBit         = 1U << 6; // full reception of a packet using the I/Q interface
+    inline constexpr uint32_t iqEecTransmissionComplete24GroupBit = 1U << 7; // completion of tx using I/Q interface with embedded control
+    inline constexpr uint32_t iqPreambleReception24GroupBit       = 1U << 8; // reception of a preamble using the I/Q interface
+    inline constexpr uint32_t iqPacketReception24GroupBit         = 1U << 9; // full reception of a packet using the I/Q interface
+
+    /// "Internal" event group bits. Used for communication of certain driver functions with handle_irq()
+    inline constexpr uint32_t transceiver09Ready            = 1U << 10; // signal about TXPREP interrupt
+    inline constexpr uint32_t transceiver24Ready            = 1U << 11;
+    inline constexpr uint32_t basebandTx09GroupBit          = 1U << 12; // signal finished transmission for sub GHz baseband core
+    inline constexpr uint32_t basebandTx24GroupBit          = 1U << 13; // signal finished transmission for 2.4 baseband core
+    inline constexpr uint32_t basebandRx09GroupBit          = 1U << 14; // signal finished reception for sub GHz baseband core
+    inline constexpr uint32_t basebandRx24GroupBit          = 1U << 15; // signal finished reception for 2.4 GHz baseband core
+    inline constexpr uint32_t energyDetCompletion09GroupBit = 1U << 16;
+    inline constexpr uint32_t energyDetCompletion24GroupBit = 1U << 17;
+
     /// RFn_STATE
     enum class State {
         RF_NOP = 0x0,
@@ -247,7 +271,7 @@ namespace AT86RF215 {
     };
 
     enum class ChipMode {
-        RF_MODE_BBRF = 0x0,   ///< BBC0, BBC1, I/Q IF enabled
+        RF_MODE_BBRF = 0x0,   ///< BBC0, BBC1 enabled, I/Q IF disabled
         RF_MODE_RF = 0x1,     ///< BBC0, BBC1 disabled, I/Q IF enabled
         RF_MODE_BBRF09 = 0x4, ///< BBC0 disabled , BBC1 enabled, I/Q IF enabled (sub 1GHz)
         RF_MODE_BBRF24 = 0x5, ///< BBC0 enabled , BBC1 disabled, I/Q IF enabled (2.4GHz)
@@ -837,5 +861,4 @@ namespace AT86RF215 {
     };
 
     inline constexpr uint16_t MaxBasebandCorePacketLength = 2047;
-    inline constexpr uint16_t SpiTimeout = 1000;  // in ms
 } // namespace AT86RF215
