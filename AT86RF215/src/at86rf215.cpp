@@ -75,19 +75,14 @@ namespace AT86RF215 {
     /** =========== Driver's public interface  =========== **/
     void At86rf215_Utilities::initializeResources(SPI_HandleTypeDef* spiHandle, Error& error) {
         hspi = spiHandle;
-
-        userRequest09 = UserRequest::NO_REQUEST;
-        userRequest24 = UserRequest::NO_REQUEST;
-        energy_measurement09 = 0;
-        energy_measurement24 = 0;
         received_packet_length09 = 0;
         received_packet_length24 = 0;
 
         // Initialize the mutex and the event group
-        resourcesMutexHandle = xSemaphoreCreateMutexStatic(&resourcesMutexBuffer);
+        spiAccessMutexHandle = xSemaphoreCreateMutexStatic(&spiAccessMutexBuffer);
         eventGroupHandle = xEventGroupCreateStatic(&eventGroupBuffer);
 
-        if (resourcesMutexHandle == nullptr || eventGroupHandle == nullptr) {
+        if (spiAccessMutexHandle == nullptr || eventGroupHandle == nullptr) {
             error = Error::FREERTOS_RESOURCE_INITIALIZATION_FAILED;
             return;
         }
@@ -122,50 +117,54 @@ namespace AT86RF215 {
     }
 
     State At86rf215_Utilities::get_state(Transceiver transceiver, Error& err) {
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return State::RF_INVALID;
         }
         State state = get_state_private(transceiver, err);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
         return state;
     }
 
     void At86rf215_Utilities::set_state(Transceiver transceiver, State state_cmd,
                               Error& err) {
-
         // wait for the requested transceiver to become free for usage
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
-        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(mutexTimeout)) & transceiverUnoccupiedGroupBit == false) {
+        uint32_t transceiverUnoccupiedGroupBitDelay = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverUnoccupiedGroupBitDelay)) & transceiverUnoccupiedGroupBit) == 0) {
             err = Error::ONGOING_TRANSMISSION_RECEPTION;
             return;
         }
 
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
 
         set_state_private(transceiver, state_cmd, err);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
+        // unlock transceiver
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     void At86rf215_Utilities::chip_reset(Error& error) {
-        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit,
-        pdFALSE, pdTRUE, pdMS_TO_TICKS(mutexTimeout)) &
-        (transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit) == false) {
+        // wait for both transceivers to become available and lock them
+        uint32_t transceiverUnoccupiedGroupBitDelay = transceiverUnoccupied09DelayMs > transceiverUnoccupied24DelayMs ?
+            transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit,
+        pdTRUE, pdTRUE, pdMS_TO_TICKS(transceiverUnoccupiedGroupBitDelay)) &
+        (transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit)) == 0) {
             error = Error::ONGOING_TRANSMISSION_RECEPTION;
             return;
         }
 
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            error = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            error = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
             return;
         }
-
-        // make the transceiver unavailable
-        xEventGroupClearBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
 
         // Chip reset
         spi_write_8(RegisterAddress::RF_RST, 0x07, error);
@@ -178,84 +177,131 @@ namespace AT86RF215 {
 
         // Restore the current config settings
         set_state_private(RF09, State::RF_TRXOFF, error);
-        if (error != Error::NO_ERRORS) {
-            return;
-        }
         set_state_private(RF24, State::RF_TRXOFF, error);
-        if (error != Error::NO_ERRORS) {
-            return;
-        }
         setup(error);
 
-        // free up transceiver
+        xSemaphoreGive(spiAccessMutexHandle);
+        // reset event group
+        xEventGroupClearBits(eventGroupHandle, 0xFFFFFFFF);
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
-        xSemaphoreGive(resourcesMutexHandle);
     }
 
     etl::expected<void, Error> At86rf215_Utilities::check_transceiver_connection(Error& err) {
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return etl::unexpected(err);
         }
 
         const DevicePartNumber dpn = get_part_number(err);
+        xSemaphoreGive(spiAccessMutexHandle);
         if (err == Error::NO_ERRORS && dpn == DevicePartNumber::AT86RF215) {
-            xSemaphoreGive(resourcesMutexHandle);
             return {}; /// success
         } else {
-            xSemaphoreGive(resourcesMutexHandle);
             return etl::unexpected<Error>(err);
         }
     }
 
-    int8_t At86rf215_Utilities::clear_channel_assessment(Transceiver transceiver, Error& err) {
-        // wait for the requested transceiver to become free for usage
+    int8_t At86rf215_Utilities::clear_channel_assessment(Transceiver transceiver, etl::optional<ReceiverBandwidth> bw, Error& err) {
+        err = Error::NO_ERRORS;
+
+        // wait for the requested transceiver to become available and lock it
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
-        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(mutexTimeout)) & transceiverUnoccupiedGroupBit == false) {
+        uint32_t transceiverUnoccupiedGroupBitDelay = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverUnoccupiedGroupBitDelay)) & transceiverUnoccupiedGroupBit) == 0) {
             err = Error::ONGOING_TRANSMISSION_RECEPTION;
             return 0;
         }
 
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return 0;
         }
 
-        if (transceiver == RF09) {
-            userRequest09 = UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT;
-        } else {
-            userRequest24 = UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT;
+        // set the bandwidth
+        RegisterAddress rxbwc = transceiver == RF09 ? RF09_RXBWC : RF24_RXBWC;
+        uint8_t rxbwcVal = 0;
+        if (bw.has_value()) {
+            set_state_private(transceiver, State::RF_TRXOFF, err);
+            rxbwcVal = spi_read_8(rxbwc, err);
+            spi_write_8(rxbwc, rxbwcVal | static_cast<uint8_t>(bw.value()), err);
         }
 
         set_state_private(transceiver, State::RF_TXPREP, err);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
 
-        // wait for the one shot measurement to finish
-        if (transceiver == RF09) {
-            if (xEventGroupWaitBits(eventGroupHandle,
-                energyDetCompletion09GroupBit,
-                pdTRUE, pdTRUE,
-                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                err = Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED;
-                return 0;
-            }
-        } else {
-            if (xEventGroupWaitBits(eventGroupHandle,
-                energyDetCompletion24GroupBit,
-                pdTRUE, pdTRUE,
-                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                err = Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED;
-                return 0;
-            }
-        }
-
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        // wait for the transceiver to enter RF_TXPREP
+        uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverReadyDelayMs)) & transceiverReadyGroupBit) == false) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::FAILED_CHANGING_STATE;
             return 0;
         }
-        const int8_t energyMeasurement = transceiver == RF09 ? energy_measurement09 : energy_measurement24;
-        xSemaphoreGive(resourcesMutexHandle);
+
+        // begin the single shot conversion
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return 0;
+        }
+
+        bool bbcEnabled;
+        RegisterAddress bbcPcReg;
+        RegisterAddress edcReg;
+        uint8_t bbcPcVal = 0;
+        if (transceiver == RF09) {
+            bbcEnabled = basebandCoreConfig.baseBandEnable09;
+            bbcPcReg = BBC0_PC;
+            edcReg = RF09_EDC;
+        } else {
+            bbcEnabled = basebandCoreConfig.baseBandEnable24;
+            bbcPcReg = BBC1_PC;
+            edcReg = RF24_EDC;
+        }
+
+        set_state_private(transceiver, State::RF_RX, err);
+        if (bbcEnabled) { // temporarily disable baseband core
+            bbcPcVal = spi_read_8(bbcPcReg,err);
+            spi_write_8(bbcPcReg,bbcPcVal & 0xFB,err);
+        }
+        spi_write_8(edcReg, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE), err);
+        xSemaphoreGive(spiAccessMutexHandle);
+
+        // wait for the one shot measurement to finish
+        uint32_t energyDetectionCompletionGroupBit = transceiver == RF09 ? energyDetCompletion09GroupBit : energyDetCompletion24GroupBit;
+        uint32_t energyDetectionCompletionGroupBitDelayMs = transceiver == RF09 ? energyDetCompletion09DelayMs : energyDetCompletion24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle,
+            energyDetectionCompletionGroupBit,
+            pdTRUE, pdFALSE,
+            pdMS_TO_TICKS(energyDetectionCompletionGroupBitDelayMs)) & energyDetectionCompletionGroupBit) == 0) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED;
+            return 0;  // TODO problem: need to re-enable core and get to TRXOFF
+        }
+
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return 0; // TODO problem: need to re-enable core and get to TRXOFF
+        }
+
+        // re-enable baseband Core
+        if (bbcEnabled) {
+            spi_write_8(bbcPcReg, bbcPcVal | 0x4, err);
+        }
+        set_state_private(transceiver, State::RF_TRXOFF, err);
+
+        // restore bw setting
+        if (bw.has_value()) {
+            spi_write_8(rxbwc, rxbwcVal, err);
+        }
+
+        const int8_t energyMeasurement = get_receiver_energy_detection(transceiver, err);
+        xSemaphoreGive(spiAccessMutexHandle);
+        // unlock transceiver
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
         return energyMeasurement;
     }
 
@@ -263,17 +309,36 @@ namespace AT86RF215 {
     // wait 8μs + RXDFE.SR + Tu
     // read rssi
     void At86rf215_Utilities::packetTransmissionBaseband(Transceiver transceiver,
-                                               uint8_t* packet, uint16_t length, Error& err) {
-        // wait for the requested transceiver to become free for usage
+                                                         uint8_t* packet, uint16_t length, Error& err) {
+        // ensure valid chip mode
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF ||                                 // no bb core is active
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ||    // 09 bb core is inactive
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ) {   // 24 bb core is inactive
+            err = Error::INVALID_CHIP_MODE;
+            return;
+        }
+
+        // ensure the baseband core is active
+        if ((transceiver == RF09 && !basebandCoreConfig.baseBandEnable09) ||
+            (transceiver == RF24 && !basebandCoreConfig.baseBandEnable24)) {
+            err = Error::INVALID_CHIP_MODE;
+            return;
+        }
+
+        err = Error::NO_ERRORS;
+
+        // wait for the requested transceiver to become available and lock it
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
-        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(mutexTimeout)) & transceiverUnoccupiedGroupBit == false) {
+        uint32_t transceiverUnoccupiedGroupBitDelay = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverUnoccupiedGroupBitDelay)) & transceiverUnoccupiedGroupBit) == 0) {
             err = Error::ONGOING_TRANSMISSION_RECEPTION;
             return;
         }
 
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
 
@@ -294,397 +359,392 @@ namespace AT86RF215 {
         // write length to register
         spi_write_8(regtxfll, length & 0xFF, err);
         if (err != Error::NO_ERRORS) {
-            xSemaphoreGive(resourcesMutexHandle);
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
             return;
         }
         spi_write_8(regtxflh, (length >> 8) & 0x07, err);
         if (err != Error::NO_ERRORS) {
-            xSemaphoreGive(resourcesMutexHandle);
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
             return;
         }
 
         // write to tx frame buffer
         spi_block_write_8(regfbtxs, length, packet, err);
         if (err != Error::NO_ERRORS) {
-            xSemaphoreGive(resourcesMutexHandle);
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
             return;
         }
 
-        if (transceiver == RF09) {
-            userRequest09 = UserRequest::BASEBAND_TX;
-        } else {
-            userRequest24 = UserRequest::BASEBAND_TX;
-        }
-
         set_state_private(transceiver, State::RF_TXPREP, err);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
 
-        // wait for the semaphore tx complete semaphore, to ensure the operation
-        // was completed
-        if (transceiver == RF09) {
-            if (xEventGroupWaitBits(eventGroupHandle,
-                basebandTx09GroupBit,
-                pdTRUE, pdTRUE,
-                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                err = Error::TRANSMISSION_FAILED;
-            }
-        } else {
-            if (xEventGroupWaitBits(eventGroupHandle,
-                basebandTx24GroupBit,
-                pdTRUE, pdTRUE,
-                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                err = Error::TRANSMISSION_FAILED;
-            }
+        // ensure the transceiver entered RF_TXPREP
+        uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverReadyDelayMs)) & transceiverReadyGroupBit) == 0) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::FAILED_CHANGING_STATE;
+            return;
         }
+
+        // start tx
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return;
+        }
+        set_state_private(transceiver, State::RF_TX, err);
+        xSemaphoreGive(spiAccessMutexHandle);
+
+        // wait for the tx complete event, to ensure the operation
+        // was completed
+        uint32_t basebandTxGroupBit = transceiver == RF09 ? basebandTx09GroupBit : basebandTx24GroupBit;
+        uint32_t basebandTxGroupBitDelayMs = transceiver == RF09 ? basebandTx09DelayMs : basebandTx24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle,
+                                 basebandTxGroupBit,
+                                 pdTRUE, pdFALSE,
+                                 pdMS_TO_TICKS(basebandTxGroupBitDelayMs)) & basebandTxGroupBit) == 0) {
+            err = Error::TRANSMISSION_FAILED;
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
+
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return;
+        }
+        set_state_private(transceiver, State::RF_TRXOFF, err);
+        xSemaphoreGive(spiAccessMutexHandle);
+
+        // unlock transceiver
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     void At86rf215_Utilities::preparePacketReceptionBaseband(Transceiver transceiver, uint8_t* destBuff, Error &err) {
-        // wait for the requested transceiver to become free for usage
+        // ensure valid chip mode
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF ||                                 // no bb core is active
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ||    // 09 bb core is inactive
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ) {   // 24 bb core is inactive
+            err = Error::INVALID_CHIP_MODE;
+            return;
+        }
+
+        // ensure the baseband core is active
+        if ((transceiver == RF09 && !basebandCoreConfig.baseBandEnable09) ||
+            (transceiver == RF24 && !basebandCoreConfig.baseBandEnable24)) {
+            err = Error::INVALID_CHIP_MODE;
+            return;
+        }
+
+        err = Error::NO_ERRORS;
+        // wait for the requested transceiver to become available and lock it
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
-        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(mutexTimeout)) & transceiverUnoccupiedGroupBit == false) {
+        uint32_t transceiverUnoccupiedGroupBitDelay = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverUnoccupiedGroupBitDelay)) & transceiverUnoccupiedGroupBit) == 0) {
             err = Error::ONGOING_TRANSMISSION_RECEPTION;
             return;
         }
 
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
 
         if (transceiver == RF09) {
-            userRequest09 = UserRequest::BASEBAND_RX;
             destBuffer09 = destBuff;
         } else {
-            userRequest24 = UserRequest::BASEBAND_RX;
             destBuffer24 = destBuff;
         }
+
         set_state_private(transceiver, State::RF_TXPREP, err);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
+
+        // ensure the transceiver entered RF_TXPREP
+        uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverReadyDelayMs)) & transceiverReadyGroupBit) == 0) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::FAILED_CHANGING_STATE;
+            return;
+        }
+
+        // now set the state to rx
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return;
+        }
+        set_state_private(transceiver, State::RF_RX, err);
+        xSemaphoreGive(spiAccessMutexHandle);
+        // successfully entered a listening state, now unlock transceiver
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     uint16_t At86rf215_Utilities::waitForPacketReceptionBaseband(Transceiver transceiver, Error &err) {
+        // ensure valid chip mode
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF ||                                 // no bb core is active
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ||    // 09 bb core is inactive
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ) {   // 24 bb core is inactive
+            err = Error::INVALID_CHIP_MODE;
+            return 0;
+        }
+
+        // ensure the baseband core is active
+        if ((transceiver == RF09 && !basebandCoreConfig.baseBandEnable09) ||
+            (transceiver == RF24 && !basebandCoreConfig.baseBandEnable24)) {
+            err = Error::INVALID_CHIP_MODE;
+            return 0;
+        }
+
         // wait until a new packet is received
-        if (transceiver == RF09) {
-            xEventGroupWaitBits(eventGroupHandle,
-                   basebandRx09GroupBit,
-                     pdTRUE, pdTRUE,
-                     portMAX_DELAY);
-        } else {
-            xEventGroupWaitBits(eventGroupHandle,
-                   basebandRx24GroupBit,
-                     pdTRUE, pdTRUE,
-                     portMAX_DELAY);
+        uint32_t basebandRxGroupBit = transceiver == RF09 ? basebandRx09GroupBit : basebandRx24GroupBit;
+        uint32_t basebandRxGroupBitDelayMs = transceiver == RF09 ? basebandRx09DelayMs : basebandRx24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle,
+               basebandRxGroupBit,
+               pdTRUE, pdFALSE,
+               pdMS_TO_TICKS(basebandRxGroupBitDelayMs) & basebandRxGroupBit)) == 0) {
+            err = Error::RX_WAIT_TIMEOUT;
+            return 0;
         }
 
         // return the length
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return 0;
         }
 
         const uint16_t length = transceiver == RF09 ? received_packet_length09 : received_packet_length24;
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
         return length;
     }
 
     void At86rf215_Utilities::prepareForPacketTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err) {
-        // wait for the requested transceiver to become free for usage
-        uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
-        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(mutexTimeout)) & transceiverUnoccupiedGroupBit == false) {
+        // ensure valid chip mode
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||                               // I/Q interface inactive
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||    // 09 IQ IF  is inactive
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ) {   // 24 IQ IF  is inactive
+            err = Error::INVALID_CHIP_MODE;
+            return;
+        }
+
+        err = Error::NO_ERRORS;
+        // wait for the requested transceiver(s) to become available and lock it
+        uint32_t transceiverUnoccupiedGroupBits;
+        uint32_t transceiverUnoccupiedGroupBitsDelayMs;
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF) {
+            // lock both radios
+            transceiverUnoccupiedGroupBits = transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit;
+            transceiverUnoccupiedGroupBitsDelayMs = transceiverUnoccupied09DelayMs > transceiverUnoccupied24DelayMs ?
+                transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        } else {
+            transceiverUnoccupiedGroupBits = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
+            transceiverUnoccupiedGroupBitsDelayMs = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        }
+
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBits,
+        pdTRUE, pdTRUE, pdMS_TO_TICKS(transceiverUnoccupiedGroupBitsDelayMs)) & transceiverUnoccupiedGroupBits) == 0) {
             err = Error::ONGOING_TRANSMISSION_RECEPTION;
             return;
         }
 
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBits);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
 
-        if (transceiver == RF09) {
-            userRequest09 = UserRequest::IQ_EEC_TX;
-        } else {
-            userRequest24 = UserRequest::IQ_EEC_TX;
+        // set the requested radio to RF_TXPREP (and disable the second one if the chip mode is RF_BBRF)
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF) {
+            set_state_private(transceiver == RF09 ? RF24 : RF09, State::RF_TRXOFF, err);
         }
         set_state_private(transceiver, State::RF_TXPREP, err);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
+
+        // ensure the transceiver entered RF_TXPREP
+        uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverReadyDelayMs)) & transceiverReadyGroupBit) == 0) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBits);
+            err = Error::FAILED_CHANGING_STATE;
+        }
     }
 
     void At86rf215_Utilities::waitForPacketTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err) {
-        // wait for the baseband processor to end transmission
-        if (transceiver == RF09) {
-            if (xEventGroupWaitBits(eventGroupHandle,
-                iqEecTransmissionComplete09GroupBit,
-                pdTRUE, pdTRUE,
-                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                err = Error::TRANSMISSION_FAILED;
-                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit);
-                return;
+        // wait for the external baseband processor to end transmission
+        uint32_t iqEecTransmissionCompleteGroupBit = transceiver == RF09 ? iqEecTransmissionComplete09GroupBit : iqEecTransmissionComplete24GroupBit;
+        uint32_t iqEecTransmissionCompleteDelayMs = transceiver == RF09 ? iqEecTransmissionComplete09DelayMs : iqEecTransmissionComplete24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, iqEecTransmissionCompleteGroupBit,
+                        pdTRUE, pdFALSE,
+                        pdMS_TO_TICKS(iqEecTransmissionCompleteDelayMs)) & iqEecTransmissionComplete09GroupBit) == 0) {
+            err = Error::TRANSMISSION_FAILED;
+            if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF) {
+                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+            } else {
+                xEventGroupSetBits(eventGroupHandle, transceiver == RF09? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
             }
-        } else {
-            if (xEventGroupWaitBits(eventGroupHandle,
-                iqEecTransmissionComplete24GroupBit,
-                pdTRUE, pdTRUE,
-                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                err = Error::TRANSMISSION_FAILED;
-                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied24GroupBit);
-                return;
-            }
-        }
-
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
             return;
         }
 
-        // Assuming the resource mutex was obtained immediately, we need to wait t_tx_proc_delay for the
-        // transceiver to finish transmitting the I/Q samples, and t_pa_ram for the amp to ramp down (figure 7-6).
-        // The longest possible wait is  13.75us + 32us = 45.75us (tables 6-1, 6-3).
-        uint8_t tries = 0;
-        State state;
-
-        // poll the state of the transceiver, until it reaches state TX_PREP
-        // TODO maybe use __NOP() in a for loop to wait instead
-        do {
-            state = get_state_private(transceiver, err);
-            tries++;
-            if (err != Error::NO_ERRORS) {
-                break;
-            }
-        } while (state == State::RF_TX && tries < 60);
-
-        if (tries >= 60 || err != Error::NO_ERRORS) {
+        // wait for the transceiver to finish transmission (get back to state TX_PREP)
+        uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverReadyDelayMs)) & transceiverReadyGroupBit) == 0) {
             err = Error::FAILED_CHANGING_STATE;
-            xSemaphoreGive(resourcesMutexHandle);
-            return;
         }
 
-        // transmission is finished, now the transceiver can be freed up
-        xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
-        xSemaphoreGive(resourcesMutexHandle);
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        } else {
+            xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
+        }
     }
 
     void At86rf215_Utilities::preparePacketReceptionIQ(Transceiver transceiver, Error &err) {
-        // wait for the requested transceiver to become free for usage
+        err = Error::NO_ERRORS;
+        // wait for the requested transceiver to become available and lock it
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
-        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(mutexTimeout)) & transceiverUnoccupiedGroupBit == false) {
+        uint32_t transceiverUnoccupiedDelayMs =  transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverUnoccupiedDelayMs)) & transceiverUnoccupiedGroupBit) == 0) {
             err = Error::ONGOING_TRANSMISSION_RECEPTION;
             return;
         }
 
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
 
-        if (transceiver == RF09) {
-            userRequest09 = UserRequest::IQ_RX;
-        } else {
-            userRequest24 = UserRequest::IQ_RX;
-        }
         set_state_private(transceiver, State::RF_TXPREP, err);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
+
+        // wait for the transceiver to enter state TXPREP
+        uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverReadyDelayMs)) & transceiverReadyGroupBit) == 0) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::FAILED_CHANGING_STATE;
+            return;
+        }
+
+        // now set the state to RX
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return;
+        }
+
+        set_state_private(transceiver, State::RF_RX, err);
+        xSemaphoreGive(spiAccessMutexHandle);
+        // successfully entered a listening state, now unlock transceiver
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     void At86rf215_Utilities::waitForPacketReceptionIQ(Transceiver transceiver, Error& err) {
-        // wait until a preamble is detected
-        if (transceiver == RF09) {
-            xEventGroupWaitBits(eventGroupHandle,
-                                iqPreambleReception09GroupBit,
-                                pdTRUE, pdTRUE,
-                                portMAX_DELAY);
-        } else {
-            xEventGroupWaitBits(eventGroupHandle,
-                                iqPreambleReception24GroupBit,
-                                pdTRUE, pdTRUE,
-                                portMAX_DELAY);
-        }
-
-        // "lock" the transceiver and freeze the agc
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        // wait until a preamble is detected and lock the transceiver
+        uint32_t iqPreambleReceptionGroupBit = transceiver == RF09 ? iqPreambleReception09GroupBit : iqPreambleReception24GroupBit;
+        uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
+        uint32_t iqPreambleReceptionDelay = transceiver == RF09 ? iqPreambleReception09DelayMs : iqPreambleReception24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle,
+                            iqPreambleReceptionGroupBit | transceiverUnoccupiedGroupBit,
+                            pdTRUE, pdTRUE,
+                            pdMS_TO_TICKS(iqPreambleReceptionDelay)) & (iqPreambleReceptionGroupBit | transceiverUnoccupiedGroupBit)) == 0) {
+            err = Error::RX_WAIT_TIMEOUT;
             return;
         }
 
-        xEventGroupClearBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
+        // freeze the agc
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return;
+        }
 
         RegisterAddress agcc = transceiver == RF09 ? RegisterAddress::RF09_AGCC : RegisterAddress::RF24_AGCC;
 
         uint8_t regVal = spi_read_8(agcc, err);
         if (err != Error::NO_ERRORS) {
-            xSemaphoreGive(resourcesMutexHandle);
+            xSemaphoreGive(spiAccessMutexHandle);
             return;
         }
 
         spi_write_8(agcc, regVal | 0x02, err);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
 
         // wait for packet reception
-        if (transceiver == RF09) {
-            if (xEventGroupWaitBits(eventGroupHandle,
-                iqPacketReception09GroupBit,
-                pdTRUE, pdTRUE,
-                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                err = Error::RECEPTION_FAILED;
-                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit);
-                return;
-            }
-        } else {
-            if (xEventGroupWaitBits(eventGroupHandle,
-                iqPacketReception24GroupBit,
-                pdTRUE, pdTRUE,
-                pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                err = Error::RECEPTION_FAILED;
-                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied24GroupBit);
-                return;
-            }
+        uint32_t iqPacketReceptionGroupBit = transceiver == RF09 ? iqPacketReception09GroupBit : iqPacketReception24GroupBit;
+        uint32_t iqPacketReceptionDelayMs = transceiver == RF09 ? iqPacketReception09DelayMs : iqPacketReception24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle,
+        iqPacketReceptionGroupBit,
+        pdTRUE, pdFALSE,
+        pdMS_TO_TICKS(iqPacketReceptionDelayMs)) & iqPacketReceptionGroupBit) == 0) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::RECEPTION_FAILED;
+            return;
         }
 
-        // "unlock" the transceiver and release the AGC
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        // release the AGC and "unlock" the transceiver
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
 
         regVal = spi_read_8(agcc, err);
-        if (err != Error::NO_ERRORS) {
-            xSemaphoreGive(resourcesMutexHandle);
-            return;
-        }
-
         spi_write_8(agcc, regVal & 0xFD, err);
-        xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
-    void At86rf215_Utilities::transmitMorseCode(Transceiver transceiver, Error& err, float wpm, const char* sequence, uint16_t sequenceLen) {
-        // wait for the requested transceiver to become free for usage
-        uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
-        if (xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(mutexTimeout)) & transceiverUnoccupiedGroupBit == false) {
-            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+    void At86rf215_Utilities::enableIQLoopbackMode(Error& err) {
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return;
+        }
+        const uint32_t iqifc0Val = spi_read_8(RF_IQIFC0, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
             return;
         }
 
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        spi_write_8(RF_IQIFC0, iqifc0Val | 0x80, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
             return;
         }
 
-        // setup transceiver as shown in table 13-2 (middle column)
-        RegisterAddress iqfc1_reg = RF_IQIFC1;
-        RegisterAddress pc_reg;
-        RegisterAddress txfhl_reg;
-        RegisterAddress txfll_reg;
-        RegisterAddress txdaci_reg;
-        RegisterAddress txdacq_reg;
+        xSemaphoreGive(spiAccessMutexHandle);
+    }
 
-        if (transceiver == RF09) {
-            pc_reg = BBC0_PC;
-            txfhl_reg = BBC0_TXFLH;
-            txfll_reg = BBC0_TXFLL;
-            txdaci_reg = RF09_TXDACI;
-            txdacq_reg = RF09_TXDACQ;
-        } else {
-            pc_reg = BBC1_PC;
-            txfhl_reg = BBC1_TXFLH;
-            txfll_reg = BBC1_TXFLL;
-            txdaci_reg = RF24_TXDACI;
-            txdacq_reg = RF24_TXDACQ;
+    void At86rf215_Utilities::disableIQLoopbackMode(Error& err) {
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return;
         }
-
-        const uint8_t iqfc1_val = spi_read_8(iqfc1_reg, err);
-        const uint8_t pc_val = spi_read_8(pc_reg, err);
-        const uint8_t txfhl_val = spi_read_8(txfhl_reg, err);
-        const uint8_t txfll_val = spi_read_8(txfll_reg, err);
-
-        set_state_private(transceiver, State::RF_TRXOFF, err);
-        spi_write_8(iqfc1_reg, iqfc1_val & 0x87, err); // CHPM = 0
-        spi_write_8(pc_reg, pc_val | 0x80, err);       // CTX = 1
-        spi_write_8(txfhl_reg, 0x07, err);             // any length will do
-        spi_write_8(txfll_reg, 0xFF, err);
-        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // enable in-phase DAC overwrite with max amplitude
-        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // enable quadrature-phase DAC overwrite with min amplitude
-
-        if (transceiver == RF09) {
-            userRequest09 = UserRequest::MORCE_CODE_OOK;
-        } else {
-            userRequest24 = UserRequest::MORCE_CODE_OOK;
-        }
-        set_state_private(transceiver, State::RF_TXPREP, err);
-        xSemaphoreGive(resourcesMutexHandle);
-        vTaskDelay(pdMS_TO_TICKS(10));
-
-        const auto timeUnit = static_cast<uint16_t>(1200 / wpm);
-        for (uint16_t i = 0; i < sequenceLen; i++) {
-            if (sequence[i] == ' ') { // large delay for word gaps
-             vTaskDelay(7*pdMS_TO_TICKS(timeUnit));
-             continue;
-            }
-
-            MorseCodeMapping morseCodeMapping = getMorse(sequence[i]);
-            if (morseCodeMapping.dotDashNum == 0) { // skip unknown characters
-                continue;
-            }
-
-            // transmit character
-            for (uint8_t j = 0; j < morseCodeMapping.dotDashNum; j++) {
-                if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                    err = Error::RESOURCE_MUTEX_TIMEOUT;
-                    return;
-                }
-                set_state_private(transceiver, State::RF_TX, err);
-                xSemaphoreGive(resourcesMutexHandle);
-
-                if (morseCodeMapping.dotDashMapping & (0x80 >> j)) { // dot
-                    vTaskDelay(pdMS_TO_TICKS(timeUnit));
-                } else {                                             // dash
-                    vTaskDelay(3*pdMS_TO_TICKS(timeUnit));
-                }
-
-                if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-                    err = Error::RESOURCE_MUTEX_TIMEOUT;
-                    return;
-                }
-                set_state_private(transceiver, State::RF_TXPREP, err);
-                xSemaphoreGive(resourcesMutexHandle);
-
-
-                // delay between character elements
-                if (j != morseCodeMapping.dotDashNum - 1) {
-                    vTaskDelay(pdMS_TO_TICKS(timeUnit));
-                }
-            }
-
-            // Delay between characters (skip if next is a space)
-            if (i != sequenceLen - 1 && sequence[i + 1] != ' ') {
-                vTaskDelay(pdMS_TO_TICKS(3 * timeUnit));
-            }
-        }
-
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        const uint32_t iqifc0Val = spi_read_8(RF_IQIFC0, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
             return;
         }
 
-        // restore original configuration
-        spi_write_8(iqfc1_reg, iqfc1_val, err);
-        spi_write_8(pc_reg, pc_val, err);
-        spi_write_8(txfhl_reg, txfhl_val, err);
-        spi_write_8(txfll_reg, txfll_val, err);
-        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // disable in-phase DAC overwrite
-        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // disable quadrature-phase DAC overwrite
+        spi_write_8(RF_IQIFC0, iqifc0Val & 0x7F, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            return;
+        }
 
-        err = Error::NO_ERRORS;
-        xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
     }
 
     void At86rf215_Utilities::print_state(Transceiver transceiver, Error& err) {
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
 
@@ -720,7 +780,143 @@ namespace AT86RF215 {
                 LOG_ERROR << "UNDEFINED";
                 break;
         }
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
+    }
+
+    void At86rf215_Utilities::transmitMorseCode(Transceiver transceiver, Error& err, float wpm, const char* sequence, uint16_t sequenceLen) {
+        // wait for the requested transceiver to become available and lock it
+        uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
+        uint32_t transceiverUnoccupiedDelayMs = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
+                                 pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverUnoccupiedDelayMs)) & transceiverUnoccupiedGroupBit) == 0) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            return;
+        }
+
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
+
+        // setup transceiver as shown in table 13-2
+        RegisterAddress iqfc0_reg = RF_IQIFC0;
+        RegisterAddress pc_reg;
+        RegisterAddress txfhl_reg;
+        RegisterAddress txfll_reg;
+        RegisterAddress txdaci_reg;
+        RegisterAddress txdacq_reg;
+
+        if (transceiver == RF09) {
+            pc_reg = BBC0_PC;
+            txfhl_reg = BBC0_TXFLH;
+            txfll_reg = BBC0_TXFLL;
+            txdaci_reg = RF09_TXDACI;
+            txdacq_reg = RF09_TXDACQ;
+        } else {
+            pc_reg = BBC1_PC;
+            txfhl_reg = BBC1_TXFLH;
+            txfll_reg = BBC1_TXFLL;
+            txdaci_reg = RF24_TXDACI;
+            txdacq_reg = RF24_TXDACQ;
+        }
+
+        const uint8_t iqfc0_val = spi_read_8(iqfc0_reg, err);
+        const uint8_t pc_val = spi_read_8(pc_reg, err);
+        const uint8_t txfhl_val = spi_read_8(txfhl_reg, err);
+        const uint8_t txfll_val = spi_read_8(txfll_reg, err);
+
+        set_state_private(transceiver, State::RF_TRXOFF, err);
+
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09)) {
+            // The respective baseband core is active. Transmit using CTX (continuous transmit)
+            spi_write_8(pc_reg, pc_val | 0x80, err);       // CTX = 1
+            spi_write_8(txfhl_reg, 0x07, err);             // any length will do
+            spi_write_8(txfll_reg, 0xFF, err);
+        } else {
+            // Transmit using only the radio. EEC needs to be temporarily turned off, in order to
+            // be able to control TXPREP-TX transitions manually
+            spi_write_8(iqfc0_reg,  iqfc0_val & 0xFE, err);
+        }
+
+        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // enable in-phase DAC overwrite with max amplitude
+        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // enable quadrature-phase DAC overwrite with min amplitude
+
+        set_state_private(transceiver, State::RF_TXPREP, err);
+        xSemaphoreGive(spiAccessMutexHandle);
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        const auto timeUnit = static_cast<uint16_t>(1200 / wpm);
+        for (uint16_t i = 0; i < sequenceLen; i++) {
+            if (sequence[i] == ' ') { // large delay for word gaps
+                vTaskDelay(7*pdMS_TO_TICKS(timeUnit));
+                continue;
+            }
+
+            MorseCodeMapping morseCodeMapping = getMorse(sequence[i]);
+            if (morseCodeMapping.dotDashNum == 0) { // skip unknown characters
+                continue;
+            }
+
+            // transmit character
+            for (uint8_t j = 0; j < morseCodeMapping.dotDashNum; j++) {
+                if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+                    xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+                    err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+                    return;
+                }
+                set_state_private(transceiver, State::RF_TX, err);
+                xSemaphoreGive(spiAccessMutexHandle);
+
+                if (morseCodeMapping.dotDashMapping & (0x80 >> j)) { // dot
+                    vTaskDelay(pdMS_TO_TICKS(timeUnit));
+                } else {                                             // dash
+                    vTaskDelay(3*pdMS_TO_TICKS(timeUnit));
+                }
+
+                if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+                    xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+                    err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+                    return;
+                }
+                set_state_private(transceiver, State::RF_TXPREP, err);
+                xSemaphoreGive(spiAccessMutexHandle);
+
+
+                // delay between character elements
+                if (j != morseCodeMapping.dotDashNum - 1) {
+                    vTaskDelay(pdMS_TO_TICKS(timeUnit));
+                }
+            }
+
+            // Delay between characters (skip if next is a space)
+            if (i != sequenceLen - 1 && sequence[i + 1] != ' ') {
+                vTaskDelay(pdMS_TO_TICKS(3 * timeUnit));
+            }
+        }
+
+        // clean up transceiver ready event bit
+        xEventGroupClearBits(eventGroupHandle, transceiver == RF09 ? transceiver09Ready : transceiver24Ready);
+
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            return;
+        }
+
+        // restore original configuration
+        set_state_private(transceiver, State::RF_TRXOFF, err);
+        spi_write_8(iqfc0_reg, iqfc0_val, err);
+        spi_write_8(pc_reg, pc_val, err);
+        spi_write_8(txfhl_reg, txfhl_val, err);
+        spi_write_8(txfll_reg, txfll_val, err);
+        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // disable in-phase DAC overwrite
+        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // disable quadrature-phase DAC overwrite
+
+        err = Error::NO_ERRORS;
+        xSemaphoreGive(spiAccessMutexHandle);
+        xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
     }
 
     void At86rf215_Utilities::print_error(Error& err) {
@@ -775,7 +971,7 @@ namespace AT86RF215 {
                 LOG_ERROR << "ONGOING_TRANSMISSION_RECEPTION";
                 break;
 
-            case Error::RESOURCE_MUTEX_TIMEOUT:
+            case Error::SPI_ACCESS_MUTEX_TIMEOUT:
                 LOG_ERROR << "MUTEX_TIMEOUT";
                 break;
 
@@ -794,6 +990,13 @@ namespace AT86RF215 {
             case Error::FREERTOS_RESOURCE_INITIALIZATION_FAILED:
                 LOG_ERROR << "SINGLE_SHOT_MEASUREMENT_FAILED";
                 break;
+
+            case Error::INVALID_CHIP_MODE:
+                LOG_ERROR << "INVALID_CHIP_MODE";
+
+            case Error::RX_WAIT_TIMEOUT:
+                LOG_ERROR << "RX_WAIT_TIMEOUT";
+
             default:
                 LOG_ERROR << "UNHANDLED_ERROR";
                 break;
@@ -801,8 +1004,8 @@ namespace AT86RF215 {
     }
 
     void At86rf215_Utilities::handle_irq(Error &err) {
-        if (xSemaphoreTake(resourcesMutexHandle, pdMS_TO_TICKS(mutexTimeout)) != pdTRUE) {
-            err = Error::RESOURCE_MUTEX_TIMEOUT;
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
 
@@ -825,41 +1028,11 @@ namespace AT86RF215 {
         }
         if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
             EnergyDetectionCompletion_flag = true;
-            // Reenable baseband Core after cca procedure
-            if (basebandCoreConfig.baseBandEnable09) {
-                uint8_t bbcpc = spi_read_8(BBC0_PC, err);
-                spi_write_8(BBC0_PC,(bbcpc & 0xFB) | 0x4, err);
-            }
-
-            energy_measurement09 = get_receiver_energy_detection(Transceiver::RF09, err);
-            xEventGroupSetBits(eventGroupHandle, energyDetCompletion09GroupBit | transceiverUnoccupied09GroupBit);
+            xEventGroupSetBits(eventGroupHandle, energyDetCompletion09GroupBit);
         }
         if ((irq & InterruptMask::TransceiverReady) != 0) {
             TransceiverReady_flag = true;
-            switch (userRequest09) {
-            case UserRequest::BASEBAND_RX:
-                [[fallthrough]];
-            case UserRequest::IQ_RX: // do not lock the transceiver in these "listening states", just set to RX
-                set_state_private(Transceiver::RF09, State::RF_RX, err);
-                break;
-            case UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT: {
-                    xEventGroupClearBits(eventGroupHandle, transceiverUnoccupied09GroupBit);
-                    uint8_t bbcpc = spi_read_8(BBC0_PC,err);
-                    spi_write_8(BBC0_PC,bbcpc & 0xFB,err);
-                    spi_write_8(RF09_EDC, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE), err);
-                    break;
-            }
-            case UserRequest::BASEBAND_TX:
-                xEventGroupClearBits(eventGroupHandle, transceiverUnoccupied09GroupBit);
-                set_state_private(Transceiver::RF09, State::RF_TX, err);
-                break;
-            case UserRequest::IQ_EEC_TX: // No need to set the state to TX. This is performed automatically when I_DATA[0] == 1
-                [[fallthrough]]
-            case UserRequest::MORCE_CODE_OOK:
-                xEventGroupClearBits(eventGroupHandle, transceiverUnoccupied09GroupBit);
-                break;
-            }
-            userRequest09 = UserRequest::NO_REQUEST;
+            xEventGroupSetBits(eventGroupHandle, transceiver09Ready);
         }
         if ((irq & InterruptMask::Wakeup) != 0) {
             Wakeup_flag = true;
@@ -879,13 +1052,12 @@ namespace AT86RF215 {
         if ((irq & InterruptMask::AGCHold) != 0) {
             // AGC Hold handling
             AGCHold_flag = true;
-            // xTaskNotifyFromISR(rf_rxtask->taskHandle, AGC_HOLD, eSetBits, &xHigherPriorityTaskWoken);
         }
         if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
             TransmitterFrameEnd_flag = true;
 
             // notify packetTransmissionBaseband() about successful transmission
-            xEventGroupSetBits(eventGroupHandle, basebandTx09GroupBit | transceiverUnoccupied09GroupBit);
+            xEventGroupSetBits(eventGroupHandle, basebandTx09GroupBit);
         }
         if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
             // Receiver Extended Match handling
@@ -902,13 +1074,14 @@ namespace AT86RF215 {
             RegisterAddress regfbrxs = BBC0_FBRXS;
             received_packet_length09 = (spi_read_8(regrxflh, err) << 8) | static_cast<uint16_t>(spi_read_8(regrxfll, err));
             spi_block_read_8(regfbrxs, received_packet_length09, destBuffer09, err);
-            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit);
 
-            // notify packetReceptionBaseband()
-            xEventGroupSetBits(eventGroupHandle, basebandRx09GroupBit);
+            // notify packetReceptionBaseband() and unlock transceiver
+            xEventGroupSetBits(eventGroupHandle, basebandRx09GroupBit | transceiverUnoccupied09GroupBit);
         }
         if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
             ReceiverFrameStart_flag = true;
+
+            // Reception started. Immediately lock tranceiver so there are no interruptions
             xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit);
         }
 
@@ -931,41 +1104,11 @@ namespace AT86RF215 {
         }
         if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
             EnergyDetectionCompletion_flag = true;
-            // Reenable baseband Core after cca procedure
-            if (basebandCoreConfig.baseBandEnable24) {
-                uint8_t bbcpc = spi_read_8(BBC1_PC, err);
-                spi_write_8(BBC1_PC,(bbcpc & 0xFB) | 0x4, err);
-            }
-
-            energy_measurement24 = get_receiver_energy_detection(Transceiver::RF24, err);
-            xEventGroupSetBits(eventGroupHandle, energyDetCompletion24GroupBit | transceiverUnoccupied24GroupBit);
+            xEventGroupSetBits(eventGroupHandle, energyDetCompletion24GroupBit);
         }
         if ((irq & InterruptMask::TransceiverReady) != 0) {
             TransceiverReady_flag = true;
-            switch (userRequest24) {
-            case UserRequest::BASEBAND_RX:
-                [[fallthrough]];
-            case UserRequest::IQ_RX: // do not lock the transceiver in these "listening states", just set to RX
-                set_state_private(Transceiver::RF24, State::RF_RX, err);
-                break;
-            case UserRequest::SINGLE_SHOT_ENERGY_MEASUREMENT: {
-                    xEventGroupClearBits(eventGroupHandle, transceiverUnoccupied24GroupBit);
-                    uint8_t bbcpc = spi_read_8(BBC1_PC,err);
-                    spi_write_8(BBC1_PC,bbcpc & 0xFB,err);
-                    spi_write_8(RF24_EDC, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE), err);
-                    break;
-            }
-            case UserRequest::BASEBAND_TX:
-                xEventGroupClearBits(eventGroupHandle, transceiverUnoccupied24GroupBit);
-                set_state_private(Transceiver::RF24, State::RF_TX, err);
-                break;
-            case UserRequest::IQ_EEC_TX: // No need to set the state to TX. This is performed automatically when I_DATA[0] == 1
-                [[fallthrough]]
-            case UserRequest::MORCE_CODE_OOK:
-                xEventGroupClearBits(eventGroupHandle, transceiverUnoccupied24GroupBit);
-                break;
-            }
-            userRequest24 = UserRequest::NO_REQUEST;
+            xEventGroupSetBits(eventGroupHandle, transceiver24Ready);
         }
         if ((irq & InterruptMask::Wakeup) != 0) {
             // Wakeup handling
@@ -989,7 +1132,7 @@ namespace AT86RF215 {
             TransmitterFrameEnd_flag = true;
 
             // notify packetTransmissionBaseband() about successful transmission
-            xEventGroupSetBits(eventGroupHandle, basebandTx24GroupBit | transceiverUnoccupied24GroupBit);
+            xEventGroupSetBits(eventGroupHandle, basebandTx24GroupBit);
         }
         if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
             // Receiver Extended Match handling
@@ -1007,15 +1150,17 @@ namespace AT86RF215 {
             received_packet_length24 = (spi_read_8(regrxflh, err) << 8) | static_cast<uint16_t>(spi_read_8(regrxfll, err));
             spi_block_read_8(regfbrxs, received_packet_length24, destBuffer24, err);
 
-            // notify packetReceptionBaseband()
+            // notify packetReceptionBaseband() and unlock transceiver
             xEventGroupSetBits(eventGroupHandle, basebandRx24GroupBit | transceiverUnoccupied24GroupBit);
         }
         if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
             ReceiverFrameStart_flag = true;
+
+            // Reception started. Immediately lock tranceiver so there are no interruptions
             xEventGroupSetBits(eventGroupHandle,transceiverUnoccupied24GroupBit);
         }
 
-        xSemaphoreGive(resourcesMutexHandle);
+        xSemaphoreGive(spiAccessMutexHandle);
     }
 
     /** =========== Private functions  =========== **/
@@ -1035,7 +1180,7 @@ namespace AT86RF215 {
         uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
                             spiWriteCompleteGroupBit,
                             pdTRUE, pdTRUE,
-                            pdMS_TO_TICKS(mutexTimeout));
+                            pdMS_TO_TICKS(3*spiByteWriteCompleteDelayMs));
         if (!(eventBits & spiWriteCompleteGroupBit)) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
@@ -1061,7 +1206,7 @@ namespace AT86RF215 {
         uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
                             spiReadCompleteGroupBit,
                             pdTRUE, pdTRUE,
-                            pdMS_TO_TICKS(mutexTimeout));
+                            pdMS_TO_TICKS(2*spiByteWriteCompleteDelayMs + 3*spiByteReadCompleteDelayMs));
         if (!(eventBits & spiReadCompleteGroupBit)) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
@@ -1089,7 +1234,7 @@ namespace AT86RF215 {
         uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
                             spiWriteCompleteGroupBit,
                             pdTRUE, pdTRUE,
-                            pdMS_TO_TICKS(mutexTimeout));
+                            pdMS_TO_TICKS(2*spiByteWriteCompleteDelayMs));
         if (!(eventBits & spiWriteCompleteGroupBit)) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
@@ -1106,7 +1251,7 @@ namespace AT86RF215 {
         eventBits = xEventGroupWaitBits(eventGroupHandle,
                             spiWriteCompleteGroupBit,
                             pdTRUE, pdTRUE,
-                            pdMS_TO_TICKS(mutexTimeout));
+                            pdMS_TO_TICKS(n*static_cast<uint64_t>(spiByteWriteCompleteDelayMs)));
         if (!(eventBits & spiWriteCompleteGroupBit)) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
@@ -1132,7 +1277,7 @@ namespace AT86RF215 {
         uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
                             spiReadCompleteGroupBit,
                             pdTRUE, pdTRUE,
-                            pdMS_TO_TICKS(mutexTimeout));
+                            pdMS_TO_TICKS(2*spiByteWriteCompleteDelayMs + n*static_cast<uint64_t>(spiByteReadCompleteDelayMs)));
         if (!(eventBits & spiReadCompleteGroupBit)) {
             HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;

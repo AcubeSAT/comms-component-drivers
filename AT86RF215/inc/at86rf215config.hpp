@@ -570,7 +570,8 @@ namespace AT86RF215 {
                     .iqmodeVoltageIEE = IQmodeVoltageIEE::IEEE,
                     .embeddedControlTX = EmbeddedControlTX::ENABLED,
                     // RF_IQIFC1
-                    .chipMode = ChipMode::RF_MODE_BBRF,
+                    // .chipMode = ChipMode::RF_MODE_RF,  // I/Q mode for both transceivers
+                    .chipMode = ChipMode::RF_MODE_BBRF24, // baseband mode on sub GHz transceiver (debugging)
                     .skewAlignment = SkewAlignment::SKEW3906NS};
         }
 
