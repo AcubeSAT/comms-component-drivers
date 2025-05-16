@@ -508,7 +508,7 @@ namespace AT86RF215 {
         if ((xEventGroupWaitBits(eventGroupHandle,
                basebandRxGroupBit,
                pdTRUE, pdFALSE,
-               pdMS_TO_TICKS(basebandRxGroupBitDelayMs) & basebandRxGroupBit)) == 0) {
+               pdMS_TO_TICKS(basebandRxGroupBitDelayMs)) & basebandRxGroupBit) == 0) {
             err = Error::RX_WAIT_TIMEOUT;
             return 0;
         }
