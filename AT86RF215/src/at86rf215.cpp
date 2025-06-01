@@ -6,6 +6,7 @@ namespace AT86RF215 {
     At86rf215_Utilities transceiverUtils = At86rf215_Utilities();
 
     static constexpr MorseCodeMapping getMorse(char c) {
+        // . == 0 , - == 1 encoding starts from MSB
         switch (c) {
             // Letters (uppercase + lowercase)
             case 'A': case 'a': return { 0b01000000, 2 };  // .-
@@ -36,16 +37,16 @@ namespace AT86RF215 {
             case 'Z': case 'z': return { 0b11000000, 4 };  // --..
 
             // Digits
-            case '0': return { 0b11111000, 5 };
-            case '1': return { 0b01111000, 5 };
-            case '2': return { 0b00111000, 5 };
-            case '3': return { 0b00011000, 5 };
-            case '4': return { 0b00001000, 5 };
-            case '5': return { 0b00000000, 5 };
-            case '6': return { 0b10000000, 5 };
-            case '7': return { 0b11000000, 5 };
-            case '8': return { 0b11100000, 5 };
-            case '9': return { 0b11110000, 5 };
+            case '0': return { 0b11111000, 5 }; // -----
+            case '1': return { 0b01111000, 5 }; // .----
+            case '2': return { 0b00111000, 5 }; // ..---
+            case '3': return { 0b00011000, 5 }; // ...--
+            case '4': return { 0b00001000, 5 }; // ....-
+            case '5': return { 0b00000000, 5 }; // .....
+            case '6': return { 0b10000000, 5 }; // -....
+            case '7': return { 0b11000000, 5 }; // --...
+            case '8': return { 0b11100000, 5 }; // ---...
+            case '9': return { 0b11110000, 5 }; // ----.
 
             // Punctuation
             case '.': return { 0b01010100, 6 };  // .-.-.-
@@ -168,19 +169,52 @@ namespace AT86RF215 {
 
         // Chip reset
         spi_write_8(RegisterAddress::RF_RST, 0x07, error);
+        if (error != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        }
 
         // Reset IRQ status registers
         spi_read_8(RegisterAddress::RF09_IRQS, error);
+        if (error != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        }
+
         spi_read_8(RegisterAddress::RF24_IRQS, error);
+        if (error != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        }
+
         spi_read_8(RegisterAddress::BBC0_IRQS, error);
+        if (error != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        }
+
         spi_read_8(RegisterAddress::BBC1_IRQS, error);
+        if (error != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        }
 
         // Restore the current config settings
         set_state_private(RF09, State::RF_TRXOFF, error);
-        set_state_private(RF24, State::RF_TRXOFF, error);
-        setup(error);
+        if (error != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        }
 
+        set_state_private(RF24, State::RF_TRXOFF, error);
+        if (error != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        }
+
+        setup(error);
         xSemaphoreGive(spiAccessMutexHandle);
+
         // reset event group
         xEventGroupClearBits(eventGroupHandle, 0xFFFFFFFF);
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
@@ -196,9 +230,9 @@ namespace AT86RF215 {
         xSemaphoreGive(spiAccessMutexHandle);
         if (err == Error::NO_ERRORS && dpn == DevicePartNumber::AT86RF215) {
             return {}; /// success
-        } else {
-            return etl::unexpected<Error>(err);
         }
+
+        return etl::unexpected(err);
     }
 
     int8_t At86rf215_Utilities::clear_channel_assessment(Transceiver transceiver, etl::optional<ReceiverBandwidth> bw, Error& err) {
@@ -219,16 +253,32 @@ namespace AT86RF215 {
             return 0;
         }
 
+        // helper function to handle errors for spi_write(), spi_read() and change_state_private()
+        auto handleError = [&](Error& error) -> bool {
+            if (err != Error::NO_ERRORS) {
+                xSemaphoreGive(spiAccessMutexHandle);
+                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+                return true; // Error occurred
+            }
+            return false; // No error
+        };
+
         // set the bandwidth
         RegisterAddress rxbwc = transceiver == RF09 ? RF09_RXBWC : RF24_RXBWC;
         uint8_t rxbwcVal = 0;
         if (bw.has_value()) {
             set_state_private(transceiver, State::RF_TRXOFF, err);
+            if (handleError(err)) {return 0;}
+
             rxbwcVal = spi_read_8(rxbwc, err);
+            if (handleError(err)) {return 0;}
+
             spi_write_8(rxbwc, rxbwcVal | static_cast<uint8_t>(bw.value()), err);
+            if (handleError(err)) {return 0;}
         }
 
         set_state_private(transceiver, State::RF_TXPREP, err);
+        if (handleError(err)) {return 0;}
         xSemaphoreGive(spiAccessMutexHandle);
 
         // wait for the transceiver to enter RF_TXPREP
@@ -262,11 +312,16 @@ namespace AT86RF215 {
         }
 
         set_state_private(transceiver, State::RF_RX, err);
+        if (handleError(err)) {return 0;}
         if (bbcEnabled) { // temporarily disable baseband core
             bbcPcVal = spi_read_8(bbcPcReg,err);
+            if (handleError(err)) {return 0;}
+
             spi_write_8(bbcPcReg,bbcPcVal & 0xFB,err);
+            if (handleError(err)) {return 0;}
         }
         spi_write_8(edcReg, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE), err);
+        if (handleError(err)) {return 0;}
         xSemaphoreGive(spiAccessMutexHandle);
 
         // wait for the one shot measurement to finish
@@ -290,17 +345,19 @@ namespace AT86RF215 {
         // re-enable baseband Core
         if (bbcEnabled) {
             spi_write_8(bbcPcReg, bbcPcVal | 0x4, err);
+            if (handleError(err)) {return 0;}
         }
         set_state_private(transceiver, State::RF_TRXOFF, err);
+        if (handleError(err)) {return 0;}
 
         // restore bw setting
         if (bw.has_value()) {
             spi_write_8(rxbwc, rxbwcVal, err);
+            if (handleError(err)) {return 0;}
         }
 
         const int8_t energyMeasurement = get_receiver_energy_detection(transceiver, err);
         xSemaphoreGive(spiAccessMutexHandle);
-        // unlock transceiver
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
         return energyMeasurement;
     }
@@ -310,6 +367,8 @@ namespace AT86RF215 {
     // read rssi
     void At86rf215_Utilities::packetTransmissionBaseband(Transceiver transceiver,
                                                          uint8_t* packet, uint16_t length, Error& err) {
+        err = Error::NO_ERRORS;
+
         // ensure valid chip mode
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF ||                                 // no bb core is active
             (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ||    // 09 bb core is inactive
@@ -324,8 +383,6 @@ namespace AT86RF215 {
             err = Error::INVALID_CHIP_MODE;
             return;
         }
-
-        err = Error::NO_ERRORS;
 
         // wait for the requested transceiver to become available and lock it
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
@@ -380,6 +437,10 @@ namespace AT86RF215 {
 
         set_state_private(transceiver, State::RF_TXPREP, err);
         xSemaphoreGive(spiAccessMutexHandle);
+        if (err != Error::NO_ERRORS) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
 
         // ensure the transceiver entered RF_TXPREP
         uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
@@ -398,6 +459,10 @@ namespace AT86RF215 {
         }
         set_state_private(transceiver, State::RF_TX, err);
         xSemaphoreGive(spiAccessMutexHandle);
+        if (err != Error::NO_ERRORS) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
 
         // wait for the tx complete event, to ensure the operation
         // was completed
@@ -419,12 +484,12 @@ namespace AT86RF215 {
         }
         set_state_private(transceiver, State::RF_TRXOFF, err);
         xSemaphoreGive(spiAccessMutexHandle);
-
-        // unlock transceiver
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     void At86rf215_Utilities::preparePacketReceptionBaseband(Transceiver transceiver, uint8_t* destBuff, Error &err) {
+        err = Error::NO_ERRORS;
+
         // ensure valid chip mode
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF ||                                 // no bb core is active
             (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ||    // 09 bb core is inactive
@@ -440,7 +505,6 @@ namespace AT86RF215 {
             return;
         }
 
-        err = Error::NO_ERRORS;
         // wait for the requested transceiver to become available and lock it
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
         uint32_t transceiverUnoccupiedGroupBitDelay = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
@@ -464,6 +528,10 @@ namespace AT86RF215 {
 
         set_state_private(transceiver, State::RF_TXPREP, err);
         xSemaphoreGive(spiAccessMutexHandle);
+        if (err != Error::NO_ERRORS) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
 
         // ensure the transceiver entered RF_TXPREP
         uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
@@ -482,11 +550,12 @@ namespace AT86RF215 {
         }
         set_state_private(transceiver, State::RF_RX, err);
         xSemaphoreGive(spiAccessMutexHandle);
-        // successfully entered a listening state, now unlock transceiver
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     uint16_t At86rf215_Utilities::waitForPacketReceptionBaseband(Transceiver transceiver, Error &err) {
+        err = Error::NO_ERRORS;
+
         // ensure valid chip mode
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF ||                                 // no bb core is active
             (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ||    // 09 bb core is inactive
@@ -525,6 +594,8 @@ namespace AT86RF215 {
     }
 
     void At86rf215_Utilities::prepareForPacketTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err) {
+        err = Error::NO_ERRORS;
+
         // ensure valid chip mode
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||                               // I/Q interface inactive
             (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||    // 09 IQ IF  is inactive
@@ -533,7 +604,6 @@ namespace AT86RF215 {
             return;
         }
 
-        err = Error::NO_ERRORS;
         // wait for the requested transceiver(s) to become available and lock it
         uint32_t transceiverUnoccupiedGroupBits;
         uint32_t transceiverUnoccupiedGroupBitsDelayMs;
@@ -576,6 +646,16 @@ namespace AT86RF215 {
     }
 
     void At86rf215_Utilities::waitForPacketTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err) {
+        err = Error::NO_ERRORS;
+
+        // ensure valid chip mode
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||                               // I/Q interface inactive
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||    // 09 IQ IF  is inactive
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ) {   // 24 IQ IF  is inactive
+            err = Error::INVALID_CHIP_MODE;
+            return;
+        }
+
         // wait for the external baseband processor to end transmission
         uint32_t iqEecTransmissionCompleteGroupBit = transceiver == RF09 ? iqEecTransmissionComplete09GroupBit : iqEecTransmissionComplete24GroupBit;
         uint32_t iqEecTransmissionCompleteDelayMs = transceiver == RF09 ? iqEecTransmissionComplete09DelayMs : iqEecTransmissionComplete24DelayMs;
@@ -583,11 +663,7 @@ namespace AT86RF215 {
                         pdTRUE, pdFALSE,
                         pdMS_TO_TICKS(iqEecTransmissionCompleteDelayMs)) & iqEecTransmissionComplete09GroupBit) == 0) {
             err = Error::TRANSMISSION_FAILED;
-            if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF) {
-                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
-            } else {
-                xEventGroupSetBits(eventGroupHandle, transceiver == RF09? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
-            }
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
             return;
         }
 
@@ -598,15 +674,21 @@ namespace AT86RF215 {
             err = Error::FAILED_CHANGING_STATE;
         }
 
-        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF) {
-            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
-        } else {
-            xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
-        }
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
+        xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
     }
 
     void At86rf215_Utilities::preparePacketReceptionIQ(Transceiver transceiver, Error &err) {
         err = Error::NO_ERRORS;
+
+        // ensure valid chip mode
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||                               // I/Q interface inactive
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||    // 09 IQ IF  is inactive
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ) {   // 24 IQ IF  is inactive
+            err = Error::INVALID_CHIP_MODE;
+            return;
+        }
+
         // wait for the requested transceiver to become available and lock it
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
         uint32_t transceiverUnoccupiedDelayMs =  transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
@@ -624,6 +706,10 @@ namespace AT86RF215 {
 
         set_state_private(transceiver, State::RF_TXPREP, err);
         xSemaphoreGive(spiAccessMutexHandle);
+        if (err != Error::NO_ERRORS) {
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
 
         // wait for the transceiver to enter state TXPREP
         uint32_t transceiverReadyGroupBit = transceiver == RF09 ? transceiver09Ready : transceiver24Ready;
@@ -643,15 +729,29 @@ namespace AT86RF215 {
 
         set_state_private(transceiver, State::RF_RX, err);
         xSemaphoreGive(spiAccessMutexHandle);
-        // successfully entered a listening state, now unlock transceiver
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     void At86rf215_Utilities::waitForPacketReceptionIQ(Transceiver transceiver, Error& err) {
+        err = Error::NO_ERRORS;
+
+        // ensure valid chip mode
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||                               // I/Q interface inactive
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||    // 09 IQ IF  is inactive
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ) {   // 24 IQ IF  is inactive
+            err = Error::INVALID_CHIP_MODE;
+            return;
+        }
+
         // wait until a preamble is detected and lock the transceiver
         uint32_t iqPreambleReceptionGroupBit = transceiver == RF09 ? iqPreambleReception09GroupBit : iqPreambleReception24GroupBit;
+        uint32_t iqPacketReceptionGroupBit = transceiver == RF09 ? iqPacketReception09GroupBit : iqPacketReception24GroupBit;
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
         uint32_t iqPreambleReceptionDelay = transceiver == RF09 ? iqPreambleReception09DelayMs : iqPreambleReception24DelayMs;
+
+        // clear up pending events from previous calls that failed
+        xEventGroupClearBits(eventGroupHandle, iqPreambleReceptionGroupBit | iqPacketReceptionGroupBit);
+
         if ((xEventGroupWaitBits(eventGroupHandle,
                             iqPreambleReceptionGroupBit | transceiverUnoccupiedGroupBit,
                             pdTRUE, pdTRUE,
@@ -660,7 +760,7 @@ namespace AT86RF215 {
             return;
         }
 
-        // freeze the agc
+        // A frame is currently being received. Freeze the agc.
         if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
             err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
@@ -676,9 +776,9 @@ namespace AT86RF215 {
 
         spi_write_8(agcc, regVal | 0x02, err);
         xSemaphoreGive(spiAccessMutexHandle);
+        if (err != Error::NO_ERRORS) { return; }
 
         // wait for packet reception
-        uint32_t iqPacketReceptionGroupBit = transceiver == RF09 ? iqPacketReception09GroupBit : iqPacketReception24GroupBit;
         uint32_t iqPacketReceptionDelayMs = transceiver == RF09 ? iqPacketReception09DelayMs : iqPacketReception24DelayMs;
         if ((xEventGroupWaitBits(eventGroupHandle,
         iqPacketReceptionGroupBit,
@@ -697,16 +797,25 @@ namespace AT86RF215 {
         }
 
         regVal = spi_read_8(agcc, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
+
         spi_write_8(agcc, regVal & 0xFD, err);
         xSemaphoreGive(spiAccessMutexHandle);
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     void At86rf215_Utilities::enableIQLoopbackMode(Error& err) {
+        err = Error::NO_ERRORS;
+
         if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
             err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
+
         const uint32_t iqifc0Val = spi_read_8(RF_IQIFC0, err);
         if (err != Error::NO_ERRORS) {
             xSemaphoreGive(spiAccessMutexHandle);
@@ -723,6 +832,8 @@ namespace AT86RF215 {
     }
 
     void At86rf215_Utilities::disableIQLoopbackMode(Error& err) {
+        err = Error::NO_ERRORS;
+
         if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
             err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
@@ -743,6 +854,8 @@ namespace AT86RF215 {
     }
 
     void At86rf215_Utilities::print_state(Transceiver transceiver, Error& err) {
+        err = Error::NO_ERRORS;
+
         if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
             err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
@@ -784,6 +897,8 @@ namespace AT86RF215 {
     }
 
     void At86rf215_Utilities::transmitMorseCode(Transceiver transceiver, Error& err, float wpm, const char* sequence, uint16_t sequenceLen) {
+        err = Error::NO_ERRORS;
+
         // wait for the requested transceiver to become available and lock it
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
         uint32_t transceiverUnoccupiedDelayMs = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
@@ -798,6 +913,16 @@ namespace AT86RF215 {
             xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
             return;
         }
+
+        // helper function to handle errors for spi_write(), spi_read() and change_state_private()
+        auto handleError = [&](Error& error) -> bool {
+            if (err != Error::NO_ERRORS) {
+                xSemaphoreGive(spiAccessMutexHandle);
+                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+                return true; // Error occurred
+            }
+            return false; // No error
+        };
 
         // setup transceiver as shown in table 13-2
         RegisterAddress iqfc0_reg = RF_IQIFC0;
@@ -822,36 +947,57 @@ namespace AT86RF215 {
         }
 
         const uint8_t iqfc0_val = spi_read_8(iqfc0_reg, err);
+        if (handleError(err)) { return; }
+
         const uint8_t pc_val = spi_read_8(pc_reg, err);
+        if (handleError(err)) { return; }
+
         const uint8_t txfhl_val = spi_read_8(txfhl_reg, err);
+        if (handleError(err)) { return; }
+
         const uint8_t txfll_val = spi_read_8(txfll_reg, err);
+        if (handleError(err)) { return; }
 
         set_state_private(transceiver, State::RF_TRXOFF, err);
+        if (handleError(err)) { return; }
 
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||
             (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||
             (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09)) {
             // The respective baseband core is active. Transmit using CTX (continuous transmit)
             spi_write_8(pc_reg, pc_val | 0x80, err);       // CTX = 1
+            if (handleError(err)) { return; }
+
             spi_write_8(txfhl_reg, 0x07, err);             // any length will do
+            if (handleError(err)) { return; }
+
             spi_write_8(txfll_reg, 0xFF, err);
+            if (handleError(err)) { return; }
+
         } else {
             // Transmit using only the radio. EEC needs to be temporarily turned off, in order to
             // be able to control TXPREP-TX transitions manually
             spi_write_8(iqfc0_reg,  iqfc0_val & 0xFE, err);
+            if (handleError(err)) { return; }
         }
 
         spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // enable in-phase DAC overwrite with max amplitude
+        if (handleError(err)) { return; }
+
         spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // enable quadrature-phase DAC overwrite with min amplitude
+        if (handleError(err)) { return; }
 
         set_state_private(transceiver, State::RF_TXPREP, err);
+        if (handleError(err)) { return; }
+
         xSemaphoreGive(spiAccessMutexHandle);
         vTaskDelay(pdMS_TO_TICKS(10));
 
-        const auto timeUnit = static_cast<uint16_t>(1200 / wpm);
+        TickType_t lastWakeTimeTicks;
+        const TickType_t timeUnitTicks = pdMS_TO_TICKS(static_cast<uint16_t>(1200 / wpm));
         for (uint16_t i = 0; i < sequenceLen; i++) {
             if (sequence[i] == ' ') { // large delay for word gaps
-                vTaskDelay(7*pdMS_TO_TICKS(timeUnit));
+                vTaskDelayUntil(&lastWakeTimeTicks, 7*timeUnitTicks);
                 continue;
             }
 
@@ -868,12 +1014,13 @@ namespace AT86RF215 {
                     return;
                 }
                 set_state_private(transceiver, State::RF_TX, err);
+                if (handleError(err)) { return; }
                 xSemaphoreGive(spiAccessMutexHandle);
 
-                if (morseCodeMapping.dotDashMapping & (0x80 >> j)) { // dot
-                    vTaskDelay(pdMS_TO_TICKS(timeUnit));
+                if ((morseCodeMapping.dotDashMapping & (0x80 >> j)) == 0) { // dot
+                    vTaskDelayUntil(&lastWakeTimeTicks, timeUnitTicks);
                 } else {                                             // dash
-                    vTaskDelay(3*pdMS_TO_TICKS(timeUnit));
+                    vTaskDelayUntil(&lastWakeTimeTicks, 3*timeUnitTicks);
                 }
 
                 if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
@@ -882,18 +1029,18 @@ namespace AT86RF215 {
                     return;
                 }
                 set_state_private(transceiver, State::RF_TXPREP, err);
+                if (handleError(err)) { return; }
                 xSemaphoreGive(spiAccessMutexHandle);
-
 
                 // delay between character elements
                 if (j != morseCodeMapping.dotDashNum - 1) {
-                    vTaskDelay(pdMS_TO_TICKS(timeUnit));
+                    vTaskDelayUntil(&lastWakeTimeTicks, timeUnitTicks);
                 }
             }
 
             // Delay between characters (skip if next is a space)
             if (i != sequenceLen - 1 && sequence[i + 1] != ' ') {
-                vTaskDelay(pdMS_TO_TICKS(3 * timeUnit));
+                vTaskDelayUntil(&lastWakeTimeTicks, 3*timeUnitTicks);
             }
         }
 
@@ -907,16 +1054,26 @@ namespace AT86RF215 {
 
         // restore original configuration
         set_state_private(transceiver, State::RF_TRXOFF, err);
-        spi_write_8(iqfc0_reg, iqfc0_val, err);
-        spi_write_8(pc_reg, pc_val, err);
-        spi_write_8(txfhl_reg, txfhl_val, err);
-        spi_write_8(txfll_reg, txfll_val, err);
-        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // disable in-phase DAC overwrite
-        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // disable quadrature-phase DAC overwrite
+        if (handleError(err)) { return; }
 
-        err = Error::NO_ERRORS;
+        spi_write_8(iqfc0_reg, iqfc0_val, err);
+        if (handleError(err)) { return; }
+
+        spi_write_8(pc_reg, pc_val, err);
+        if (handleError(err)) { return; }
+
+        spi_write_8(txfhl_reg, txfhl_val, err);
+        if (handleError(err)) { return; }
+
+        spi_write_8(txfll_reg, txfll_val, err);
+        if (handleError(err)) { return; }
+
+        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // disable in-phase DAC overwrite
+        if (handleError(err)) { return; }
+
+        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // disable quadrature-phase DAC overwrite
         xSemaphoreGive(spiAccessMutexHandle);
-        xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
     void At86rf215_Utilities::print_error(Error& err) {
@@ -1447,17 +1604,13 @@ namespace AT86RF215 {
 
     void At86rf215_Utilities::set_pll_bw(PLLBandwidth bw, Error& err) {
         uint8_t reg_pll = spi_read_8(RF09_PLL, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         // Clear bits [5:4] and set new value
         reg_pll &= ~(0x3 << 4);                     // Clear bits [5:4] (0x3 << 4 = 0b0011 0000)
         reg_pll |= (static_cast<uint8_t>(bw) << 4); // Set new value for bits [5:4]
 
         spi_write_8(RF09_PLL, reg_pll, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
     }
 
     PLLBandwidth At86rf215_Utilities::get_pll_bw(Error& err) {
@@ -1526,7 +1679,11 @@ namespace AT86RF215 {
 
         // configure channel mode
         uint8_t cnmVal = spi_read_8(cnm, err);
+        if (err != Error::NO_ERRORS) { return; }
+
         spi_write_8(cnm, cnmVal | (static_cast<uint8_t >(channelMode) << 6), err);
+        if (err != Error::NO_ERRORS) { return; }
+
         if (channelMode == PLLChannelMode::IEECompliant) {
             // RFn_CCF0H, RFn_CCFOL:  high and low byte of central frequency
             // CNM.CHN, RFn_CNL: high bit and low byte of channel number
@@ -1547,8 +1704,13 @@ namespace AT86RF215 {
                 Nchannel = (freq - 2366000) * 65536 / 26000;
             }
             spi_write_8(ccf0h, static_cast<uint8_t>(Nchannel >> 16), err);
+            if (err != Error::NO_ERRORS) { return; }
+
             spi_write_8(ccf0l, static_cast<uint8_t>(Nchannel >> 8), err);
+            if (err != Error::NO_ERRORS) { return; }
+
             spi_write_8(cnl, static_cast<uint8_t>(Nchannel), err);
+            if (err != Error::NO_ERRORS) { return; }
         }
 
         /// RFn_PLL
@@ -1841,9 +2003,10 @@ namespace AT86RF215 {
     void At86rf215_Utilities::set_battery_monitor_voltage_threshold(
             BatteryMonitorVoltageThreshold threshold, Error& err) {
         uint8_t reg_value_bmvt = spi_read_8(RF_BMDVC, err);
-        reg_value_bmvt &= ~(0xF);
-        if (err != Error::NO_ERRORS)
+        if (err != Error::NO_ERRORS) {
             return;
+        }
+        reg_value_bmvt &= ~(0xF);
         spi_write_8(RF_BMDVC, reg_value_bmvt | static_cast<uint8_t>(threshold), err);
     }
 
@@ -1937,9 +2100,6 @@ namespace AT86RF215 {
         // Set RF_IQIFC1
         reg = (static_cast<uint8_t>(chip_mode) << 4) | static_cast<uint8_t>(skew_alignment);
         spi_write_8(RF_IQIFC1, reg, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
     }
 
     bool At86rf215_Utilities::get_iqSyncStatus(Error& err) {
@@ -1959,9 +2119,6 @@ namespace AT86RF215 {
        }
 
        set_tcxo_trimming(crystal_trim, err);
-       if (err != Error::NO_ERRORS) {
-           return;
-       }
     }
 
     void At86rf215_Utilities::setup_rx_energy_detection(Transceiver transceiver,
@@ -2066,9 +2223,7 @@ namespace AT86RF215 {
                                   PadDriverStrength padDriverStrength, Error& err) {
         RegisterAddress regcfg = RF_CFG;
         uint8_t reg_value = spi_read_8(regcfg, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
         reg_value &= ~(0xF);
         reg_value |= (maskMode << 3) | (static_cast<uint8_t>(polarity) << 2) | static_cast<uint8_t>(padDriverStrength);
         spi_write_8(regcfg, reg_value, err);
@@ -2108,6 +2263,7 @@ namespace AT86RF215 {
         }
 
         spi_write_8(regrf, iqIfSynchronizationFailure << 5 | transceiverError << 4 | batteryLow << 3 | energyDetectionCompletion << 2 | transceiverReady << 1 | wakeup, err);
+        if (err != Error::NO_ERRORS) { return; }
 
         spi_write_8(regbbc,
                     frameBufferLevelIndication << 7 | agcRelease << 6 | agcHold << 5 | transmitterFrameEnd << 4 | receiverExtendedMatch << 3 | receiverAddressMatch << 2 | receiverFrameEnd << 1 | receiverFrameStart, err);
@@ -2129,6 +2285,7 @@ namespace AT86RF215 {
         if (err != Error::NO_ERRORS) {
             return;
         }
+
         if (state != State::RF_TRXOFF) {
             err = Error::INVALID_STATE_FOR_OPERATION;
             return;
@@ -2140,27 +2297,26 @@ namespace AT86RF215 {
                        radioInterruptsConfig.wakeup09, basebandCoreInterruptsConfig.frameBufferLevelIndication09, basebandCoreInterruptsConfig.agcRelease09,
                        basebandCoreInterruptsConfig.agcHold09, basebandCoreInterruptsConfig.transmitterFrameEnd09, basebandCoreInterruptsConfig.receiverExtendedMatch09,
                        basebandCoreInterruptsConfig.receiverAddressMatch09, basebandCoreInterruptsConfig.receiverFrameEnd09, basebandCoreInterruptsConfig.receiverFrameStart09, err);
+        if (err != Error::NO_ERRORS) { return; }
 
         setup_irq_mask(Transceiver::RF24, radioInterruptsConfig.iqIfSynchronizationFailure24, radioInterruptsConfig.transceiverError24,
                        radioInterruptsConfig.batteryLow24, radioInterruptsConfig.energyDetectionCompletion24, radioInterruptsConfig.transceiverReady24,
                        radioInterruptsConfig.wakeup24, basebandCoreInterruptsConfig.frameBufferLevelIndication24, basebandCoreInterruptsConfig.agcRelease24,
                        basebandCoreInterruptsConfig.agcHold24, basebandCoreInterruptsConfig.transmitterFrameEnd24, basebandCoreInterruptsConfig.receiverExtendedMatch24,
                        basebandCoreInterruptsConfig.receiverAddressMatch24, basebandCoreInterruptsConfig.receiverFrameEnd24, basebandCoreInterruptsConfig.receiverFrameStart24, err);
+        if (err != Error::NO_ERRORS) { return; }
 
         // Set IRQ pin
         setup_irq_cfg(generalConfig.irqMaskMode, generalConfig.irqPolarity,
                       generalConfig.padDriverStrength, err);
+        if (err != Error::NO_ERRORS) { return; }
 
         // Set PLL
         configure_pll(Transceiver::RF09, freqSynthesizerConfig, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
 
         configure_pll(Transceiver::RF24, freqSynthesizerConfig, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
 
 
         // Setup Physical Layer for Baseband Cores
@@ -2168,79 +2324,63 @@ namespace AT86RF215 {
                            basebandCoreConfig.frameCheckSequenceFilterEn09, basebandCoreConfig.transmitterAutoFrameCheckSequence09,
                            basebandCoreConfig.frameCheckSequenceType09, basebandCoreConfig.baseBandEnable09,
                            basebandCoreConfig.physicalLayerType09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         setup_phy_baseband(Transceiver::RF24, basebandCoreConfig.continuousTransmit24,
                            basebandCoreConfig.frameCheckSequenceFilterEn24, basebandCoreConfig.transmitterAutoFrameCheckSequence24,
                            basebandCoreConfig.frameCheckSequenceType24, basebandCoreConfig.baseBandEnable24,
                            basebandCoreConfig.physicalLayerType24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         /// BBCn_FSKC0
         set_bbc_fskc0_config(RF09, basebandCoreConfig.bandwidth_time_09, basebandCoreConfig.midxs_09, basebandCoreConfig.midx_09, basebandCoreConfig.mord_09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         set_bbc_fskc0_config(RF24, basebandCoreConfig.bandwidth_time_24, basebandCoreConfig.midxs_24, basebandCoreConfig.midx_24, basebandCoreConfig.mord_24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         /// BBCn_FSKC1
         set_bbc_fskc1_config(RF09, basebandCoreConfig.freq_inv_09, basebandCoreConfig.sr_09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         set_bbc_fskc1_config(RF24, basebandCoreConfig.freq_inv_24, basebandCoreConfig.sr_24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         /// BBCn_FSKC2
         set_bbc_fskc2_config(RF09, basebandCoreConfig.preamble_detection_09, basebandCoreConfig.receiver_override_09, basebandCoreConfig.receiver_preamble_timeout_09, basebandCoreConfig.mode_switch_en_09, basebandCoreConfig.preamble_inversion_09, basebandCoreConfig.fec_scheme_09, basebandCoreConfig.interleaving_enable_09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         set_bbc_fskc2_config(RF24, basebandCoreConfig.preamble_detection_24, basebandCoreConfig.receiver_override_24, basebandCoreConfig.receiver_preamble_timeout_24, basebandCoreConfig.mode_switch_en_24, basebandCoreConfig.preamble_inversion_24, basebandCoreConfig.fec_scheme_24, basebandCoreConfig.interleaving_enable_24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         /// BBCn_FSKC3
         set_bbc_fskc3_config(RF09, basebandCoreConfig.sfdt_09, basebandCoreConfig.prdt_09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         set_bbc_fskc3_config(RF24, basebandCoreConfig.sfdt_24, basebandCoreConfig.prdt_24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         /// BBC_FSKC4
         set_bbc_fskc4_config(RF09, basebandCoreConfig.sfdQuantization_09, basebandCoreConfig.sfd32_09, basebandCoreConfig.rawModeReversalBit_09, basebandCoreConfig.csfd1_09, basebandCoreConfig.csfd0_09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         set_bbc_fskc4_config(RF24, basebandCoreConfig.sfdQuantization_24, basebandCoreConfig.sfd32_24, basebandCoreConfig.rawModeReversalBit_24, basebandCoreConfig.csfd1_24, basebandCoreConfig.csfd0_24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         /// BBCn_FSKPHRTX
         set_bbc_fskphrtx(RF09, basebandCoreConfig.sfdUsed_09, basebandCoreConfig.dataWhitening_09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         set_bbc_fskphrtx(RF24, basebandCoreConfig.sfdUsed_24, basebandCoreConfig.dataWhitening_24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         /// BBCn_FSKDM
         set_bbc_fskdm(RF09, basebandCoreConfig.fskPreamphasisEnable_09, basebandCoreConfig.directModEnableFskdm_09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         set_bbc_fskdm(RF24, basebandCoreConfig.fskPreamphasisEnable_24, basebandCoreConfig.directModEnableFskdm_24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         // Set TX front-end
         setup_tx_frontend(Transceiver::RF09, txConfig.powerAmplifierRampTime09,
                           txConfig.transmitterCutOffFrequency09,
@@ -2250,9 +2390,8 @@ namespace AT86RF215 {
                           externalFrontEndConfig.externalLNABypass09, externalFrontEndConfig.automaticGainControlMAP09,
                           externalFrontEndConfig.automaticVoltageExternal09, externalFrontEndConfig.analogVoltageEnable09,
                           externalFrontEndConfig.powerAmplifierVoltageControl09, externalFrontEndConfig.externalFrontEnd_09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         setup_tx_frontend(Transceiver::RF24, txConfig.powerAmplifierRampTime24,
                           txConfig.transmitterCutOffFrequency24,
                           txConfig.txRelativeCutoffFrequency24, txConfig.directModulation24,
@@ -2261,9 +2400,7 @@ namespace AT86RF215 {
                           externalFrontEndConfig.externalLNABypass24, externalFrontEndConfig.automaticGainControlMAP24,
                           externalFrontEndConfig.automaticVoltageExternal24, externalFrontEndConfig.analogVoltageEnable24,
                           externalFrontEndConfig.powerAmplifierVoltageControl24, externalFrontEndConfig.externalFrontEnd_24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
 
         // Set up RX front-end
         setup_rx_frontend(Transceiver::RF09, rxConfig.ifInversion09, rxConfig.ifShift09,
@@ -2271,45 +2408,39 @@ namespace AT86RF215 {
                           rxConfig.receiverSampleRate09, rxConfig.agcInput09,
                           rxConfig.averageTimeNumberSamples09, rxConfig.agcReset_09, rxConfig.agcFreezeControl_09, rxConfig.agcEnabled09,
                           rxConfig.automaticGainTarget09, rxConfig.gainControlWord09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         setup_rx_frontend(Transceiver::RF24, rxConfig.ifInversion24, rxConfig.ifShift24,
                           rxConfig.receiverBandwidth24, rxConfig.rxRelativeCutoffFrequency24,
                           rxConfig.receiverSampleRate24, rxConfig.agcInput24,
                           rxConfig.averageTimeNumberSamples24, rxConfig.agcReset_24, rxConfig.agcFreezeControl_24, rxConfig.agcEnabled24,
                           rxConfig.automaticGainTarget24, rxConfig.gainControlWord24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         // Set up IQ interface
         setup_iq(iqInterfaceConfig.externalLoopback, iqInterfaceConfig.iqOutputCurrent,
                  iqInterfaceConfig.iqmodeVoltage, iqInterfaceConfig.iqmodeVoltageIEE,
                  iqInterfaceConfig.embeddedControlTX, iqInterfaceConfig.chipMode, iqInterfaceConfig.skewAlignment,
                  err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
 
         /// Set up energy detection
         /// RFn_EDC, RFn_EDD
         setup_rx_energy_detection(Transceiver::RF09, rxConfig.energyDetectionMode09,
                                   rxConfig.energyDetectDurationFactor09, rxConfig.energyDetectionBasis09, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
         setup_rx_energy_detection(Transceiver::RF24, rxConfig.energyDetectionMode24,
                                   rxConfig.energyDetectDurationFactor24, rxConfig.energyDetectionBasis24, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
 
         /// Set up battery
         /// RF_BMDVC
         set_battery_monitor_control(generalConfig.batteryMonitorHighRange, generalConfig.batteryMonitorVoltage, err);
-        if (err != Error::NO_ERRORS) {
-            return;
-        }
+        if (err != Error::NO_ERRORS) { return; }
+
 
         /// Set up crystal oscillator
         /// RF_XOC
