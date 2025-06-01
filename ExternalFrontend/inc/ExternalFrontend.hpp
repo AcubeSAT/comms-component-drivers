@@ -37,7 +37,7 @@ namespace ExternalFrontend {
 
         /**
          *  @brief Open current limiters and enable components.
-         *  @param agcSwitchedIn Determines whether the AGC should be enabled or not (has affect only for RX_UHF chain).
+         *  @param agcSwitchedIn Determines whether the AGC should be enabled or not (has effect only for RX_UHF chain).
          *  @note There is a turn on time determined mainly by the current limiters. The user should begin
          *        utilizing the frontend 16ms after calling this function.
          *
@@ -51,7 +51,7 @@ namespace ExternalFrontend {
         /**
          * @brief Read the temperature from the integrated analog sensor of the AGC peripheral.
          *        The reference voltage is 600mV in 27 degrees Celsius, and the slope is 2mV/degree
-         * @returns The temperature in Celsius, if the Rx-UHF chain is active and the ADC conversion succeed.
+         * @returns The temperature in Celsius, if the Rx-UHF chain is active and the ADC conversion succeeded.
          */
         [[nodiscard]] etl::optional<float> readAGCTemperature();
 
@@ -77,11 +77,12 @@ namespace ExternalFrontend {
         ///  Determines whether automatic gain control mode is used for the RX_UHF frontend, or a constant
         ///  gain is applied instead.
         bool agcSwitchedIn;
+
         uint32_t setPointVoltage;
 
-        /// Handlers for ADC,DAC conversions (via polling mode)
-        ADC_HandleTypeDef* hadcTemp; // ADC handle for reading temperature pin of AGC
-        ADC_HandleTypeDef* hadcOutVoltAgc; // ADC handle for reading the AGC's current out voltage (which is used to set the AMP gain, if the AGC in switched in)
+        /// Handlers for ADC,DAC conversions (via polling)
+        ADC_HandleTypeDef* hadcTemp;            // ADC handle for reading temperature pin of AGC
+        ADC_HandleTypeDef* hadcOutVoltAgc;      // ADC handle for reading the AGC's current out voltage (which is used to set the AMP gain, if the AGC in switched in)
         DAC_HandleTypeDef* hdacSetpointVoltage; // DAC handle for writing the setpoint voltage
 
         /// Converted voltages are stored here
