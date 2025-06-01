@@ -323,10 +323,6 @@ namespace eMMC {
             xSemaphoreGive(eMMC_semaphoreHandle);
             return etl::unexpected(Error::EMMC_READ_FAILURE);
         }
-        //
-        // if (HAL_MMC_GetCardState(hmmc) != HAL_OK) {
-        //         return etl::unexpected(Error::EMMC_READ_FAILURE);
-        // }
 
         if (xSemaphoreTake(isrTriggeredSemaphoreHandle, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) != pdTRUE) {
             // timed out
@@ -335,8 +331,13 @@ namespace eMMC {
         }
 
         if (readComplete) {
-            // success
+            HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
             xSemaphoreGive(eMMC_semaphoreHandle);
+
+            if (status != HAL_MMC_CARD_READY) {
+                return etl::unexpected(Error::EMMC_READ_FAILURE);
+            }
+
             return {};
         }
 
@@ -372,10 +373,6 @@ namespace eMMC {
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
 
-        // if (HAL_MMC_GetCardState(hmmc) != HAL_OK) {
-        //     return etl::unexpected(Error::EMMC_WRITE_FAILURE);
-        // }
-
         if (xSemaphoreTake(isrTriggeredSemaphoreHandle, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) != pdTRUE) {
             // timed out
             xSemaphoreGive(eMMC_semaphoreHandle);
@@ -383,8 +380,13 @@ namespace eMMC {
         }
 
         if (writeComplete) {
-            // success
+            HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
             xSemaphoreGive(eMMC_semaphoreHandle);
+
+            if (status != HAL_MMC_CARD_READY) {
+              return etl::unexpected(Error::EMMC_WRITE_FAILURE);
+            }
+
             return {};
         }
 
