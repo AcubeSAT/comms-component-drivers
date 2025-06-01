@@ -156,7 +156,7 @@ namespace AT86RF215 {
                     // RF_n_PAC
                     .powerAmplifierCurrentControl09 = PowerAmplifierCurrentControl::PA_NO,
                     .powerAmplifierCurrentControl24 = PowerAmplifierCurrentControl::PA_NO,
-                    .txOutPower09 = 0x00,
+                    .txOutPower09 = 0x1F,
                     .txOutPower24 = 0x00};
         }
         void setTXDFE(Transceiver transceiver, TxRelativeCutoffFrequency cutoffFrequency, Direct_Mod_Enable_FSKDM modulation, TransmitterSampleRate sampleRate) {
@@ -570,7 +570,7 @@ namespace AT86RF215 {
                     .iqmodeVoltageIEE = IQmodeVoltageIEE::IEEE,
                     .embeddedControlTX = EmbeddedControlTX::ENABLED,
                     // RF_IQIFC1
-                    // .chipMode = ChipMode::RF_MODE_RF,  // I/Q mode for both transceivers
+                    //.chipMode = ChipMode::RF_MODE_RF,  // I/Q mode for both transceivers
                     .chipMode = ChipMode::RF_MODE_BBRF24, // baseband mode on sub GHz transceiver (debugging)
                     .skewAlignment = SkewAlignment::SKEW3906NS};
         }
