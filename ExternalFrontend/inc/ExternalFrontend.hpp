@@ -4,19 +4,7 @@
 #include "etl/optional.h"
 #include "stm32h7xx_hal_gpio.h"
 
-/// Flags that get set to true from a callback, in case the current limiters FLAGB pin goes
-///  LOW, due to output overcurrent, input undervoltage or overheating. The user may read them.
-inline volatile bool ExternalFrontend_currentLimiterAlertTxUHF = false;
-inline volatile bool ExternalFrontend_currentLimiterAlertRxUHF = false;
-inline volatile bool ExternalFrontend_currentLimiterAlertSBAND = false;
-
 namespace ExternalFrontend {
-    enum class ExternalFrontendChain {
-        TX_UHF,
-        RX_UHF,
-        TX_SBAND
-    };
-
     /**
      * A class that encapsulates all necessary functionality and state for the
      * external frontend of the SatNOGS-COMMS board.
@@ -28,45 +16,77 @@ namespace ExternalFrontend {
         /**
          * @note All chains will be set to inactive by default.
          */
-        void initializeResources(ADC_HandleTypeDef* hadc_Temp, ADC_HandleTypeDef* hadc_OutVoltAgc,
+        void initializeResources(ADC_HandleTypeDef* hadc_Temp, ADC_HandleTypeDef* hadc_Gain,
                                   DAC_HandleTypeDef* hdac_SetpointVoltage);
 
-        [[nodiscard]] bool getAgcSwitchedIn() const {
-            return agcSwitchedIn;
-        }
+        /// Flags that get set to true from a callback, in case the current limiters FLAGB pin goes
+        ///  LOW, due to output overcurrent, input undervoltage or overheating.
+        ///  TODO FDIR
+        volatile bool ExternalFrontend_currentLimiterAlertTxUHF = false;
+        volatile bool ExternalFrontend_currentLimiterAlertRxUHF = false;
+        volatile bool ExternalFrontend_currentLimiterAlertSBAND = false;
 
         /**
-         *  @brief Open current limiters and enable components.
-         *  @param agcSwitchedIn Determines whether the AGC should be enabled or not (has affect only for RX_UHF chain).
-         *  @note There is a turn on time determined mainly by the current limiters. The user should begin
-         *        utilizing the frontend 16ms after calling this function.
+         * @brief Activate 5V supply, LNA, AMPLIFIER and AGC  for UHF-Tx frontend.
          *
-         *    TODO calculate and set here the setpoint voltage as a function of a more useful input parameter,
-         *         like the desired PA output power in dBm
+         * @warning The function has effect ONLY IF the frontend was previously disabled.
+         *
+         * @details The UHF-Rx frontend uses an LNA (TQP3M9036) to amplify the signal upon reception. There is a second
+         *       stage amplification by the ADL5330, which can optionally be driven by an AGC (AD83180). Should the
+        *        AGC be used, the envelope of the signal at the output of ADL5330 is constant. Look figure 45 of the
+        *        ADL8318 datasheet for a visual explanation.
+        *
+        *  @note The default parameters are for no AGC and an approximately 0 dB gain at 450 MHz
+        *
+         * @param agcEnabled   Whether the AGC will be used to drive the amplifier.
+         * @param userSetPointVoltage This parameter should be interpreted as follows:
+         *                        agcEnabled == False: Sets a constant amplifier gain. Look TYPICAL PERFORMANCE CHARACTERISTICS
+         *                        section of the ADL5330 datasheet.
+         *                        agcEnabled == True: The AGC tries to match it's input voltage (a fraction of
+         *                        the amplifier's output voltage) with setPointVoltage.
+         *                        In any case, the maximum value  should be between 0 and MaxSetPointVoltage. An out of bounds value is clipped.
+         *
+         * @returns Whether the operation succeeded or not.
          */
-        void enableExternalFrontend(ExternalFrontendChain chain, bool agcSwitchedIn = false);
+        [[nodiscard]] bool enableUhfRxFrontend(bool agcEnabled = false, float userSetPointVoltage = 0.9);
 
-        void disableExternalFrontend(ExternalFrontendChain chain);
+        /**
+         * @brief Activate 5V supply for UHF-Tx frontend
+         */
+        void enableUhfTxFrontend();
+
+        /**
+         * @brief Activate 5V supply for SBAND-Tx frontend
+         */
+        void enableSbandTxFrontend();
+
+        void disableUhfRxFrontend();
+        void disableUhfTxFrontend();
+        void disableSbandTxFrontend();
 
         /**
          * @brief Read the temperature from the integrated analog sensor of the AGC peripheral.
          *        The reference voltage is 600mV in 27 degrees Celsius, and the slope is 2mV/degree
-         * @returns The temperature in Celsius, if the Rx-UHF chain is active and the ADC conversion succeed.
+         * @returns The temperature in Celsius, if the Rx-UHF chain is active and the ADC conversion succeeded.
          */
         [[nodiscard]] etl::optional<float> readAGCTemperature();
 
         /**
          * @brief Freeze AGC to its current gain
-         * @returns Whether operation was successful or not. False will also be returned in case the AGC is switched out.
-         *          In case of a successful operation, the ADC output is returned as well (for diagnostic purposes).
+         * @returns Whether operation was successful or not.
          */
-        etl::pair<bool, uint16_t> freezeAGC();
+        [[nodiscard]] bool freezeAGC();
 
         /**
          * @brief Return AGC to normal operation.
          * @returns Whether operation was successful or not. False will also be returned in case the AGC is switched out.
          */
-        [[nodiscard]] bool unfreezeAGC() const;
+        [[nodiscard]] bool releaseAGC() const;
+
+        /**
+         * @brief Debugging function.
+         */
+        [[nodiscard]] etl::optional<float> readGainVoltage();
 
     private:
         /// State of external frontend chains
@@ -77,32 +97,28 @@ namespace ExternalFrontend {
         ///  Determines whether automatic gain control mode is used for the RX_UHF frontend, or a constant
         ///  gain is applied instead.
         bool agcSwitchedIn;
-        uint32_t setPointVoltage;
 
-        /// Handlers for ADC,DAC conversions (via polling mode)
-        ADC_HandleTypeDef* hadcTemp; // ADC handle for reading temperature pin of AGC
-        ADC_HandleTypeDef* hadcOutVoltAgc; // ADC handle for reading the AGC's current out voltage (which is used to set the AMP gain, if the AGC in switched in)
+        /// Stores user setPoint voltage (12 bit resolution)
+        uint32_t userSetPointVoltage;
+
+        /// Handlers for ADC,DAC conversions (via polling)
+        ADC_HandleTypeDef* hadcTemp;            // ADC handle for reading temperature pin of AGC
+        ADC_HandleTypeDef* hadcGain;            // ADC handle for reading the current gain of the agc
         DAC_HandleTypeDef* hdacSetpointVoltage; // DAC handle for writing the setpoint voltage
 
-        /// Converted voltages are stored here
-        uint32_t voltageBufferTemp;
-        uint32_t voltageBufferOutVoltAGC;
+        /// Delays for waiting
+        static constexpr uint16_t TempConversionMaxDelayMs = 15;
+        static constexpr uint16_t GainAGCConversionMaxDelayMs = 15;
+        static constexpr uint16_t TurnOnDelayMs = 15; // turn on delay for the frontends (dominated by the current limiter, which needs 10.2 ms to open)
 
-        /// Delays for waiting    // TODO find proper timings
-        static constexpr uint16_t tempConversionMaxDelayMs = 15;
-        static constexpr uint16_t outVoltAGCConversionMaxDelayMs = 15;
+        static constexpr float MaxSetPointVoltage = 1.4F;
+
+        static constexpr float ReferenceVoltage = 3.28;  // VDDA
 
         /// AGC Temperature linear characteristic variables
         static constexpr float Slope = 2.0F;  // mv/degree
         static constexpr float Vref = 600.0F; // mv
         static constexpr float Tref = 27.0F;  // degrees
-
-        /**
-         * @brief Read the current output voltage of the AGC ()
-         * @note Used by freezeAGC()
-         * @returns Whether the operation was successful or not
-         */
-        bool readOutVoltageAGC();
     };
 
     extern ExternalFrontendUtilities externalFrontendUtils;
