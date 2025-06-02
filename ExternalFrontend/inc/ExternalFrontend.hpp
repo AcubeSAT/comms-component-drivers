@@ -109,6 +109,7 @@ namespace ExternalFrontend {
         /// Delays for waiting
         static constexpr uint16_t TempConversionMaxDelayMs = 15;
         static constexpr uint16_t GainAGCConversionMaxDelayMs = 15;
+        static constexpr uint16_t TurnOnDelayMs = 15; // turn on delay for the frontends (dominated by the current limiter, which needs 10.2 ms to open)
 
         static constexpr float MaxSetPointVoltage = 1.4F;
 

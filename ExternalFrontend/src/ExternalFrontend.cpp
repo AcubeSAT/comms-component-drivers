@@ -66,7 +66,6 @@ namespace ExternalFrontend {
             HAL_GPIO_WritePin(EN_RX_UHF_GPIO_Port, EN_RX_UHF_Pin, GPIO_PIN_RESET);
             // enable the AMPLIFIER, LNA and the AGC (active high logic)
             HAL_GPIO_WritePin(EN_UHF_AMP_RX_GPIO_Port, EN_UHF_AMP_RX_Pin, GPIO_PIN_SET);
-            rxUhfActive = true;
 
             // switch in the AGC (if requested)
             agcSwitchedIn = agcEnabled;
@@ -76,6 +75,9 @@ namespace ExternalFrontend {
                 HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_SET);
             }
 
+            // wait for all components to activate
+            vTaskDelay(pdMS_TO_TICKS(TurnOnDelayMs));
+            rxUhfActive = true;
             return true;
         }
         return false;
@@ -85,6 +87,7 @@ namespace ExternalFrontend {
         if (!txUhfActive) {
             // enable current limiter (active low logic)
             HAL_GPIO_WritePin(EN_PA_UHF_GPIO_Port, EN_PA_UHF_Pin, GPIO_PIN_RESET);
+            vTaskDelay(pdMS_TO_TICKS(TurnOnDelayMs));
             txUhfActive = true;
         }
     }
@@ -93,6 +96,7 @@ namespace ExternalFrontend {
         if (!sbandActive) {
             // enable current limiter (active low logic)
             HAL_GPIO_WritePin(EN_S_BAND_TX_GPIO_Port, EN_S_BAND_TX_Pin, GPIO_PIN_RESET);
+            vTaskDelay(pdMS_TO_TICKS(TurnOnDelayMs));
             sbandActive = true;
         }
     }
