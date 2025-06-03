@@ -9,10 +9,10 @@ namespace eMMC {
     etl::expected<float, Error> eMMC_Utilities::initializeResources(MMC_HandleTypeDef* handle) {
         hmmc = handle;
 
-        eMMC_semaphoreHandle = xSemaphoreCreateMutexStatic(&eMMC_semaphoreBuffer);
+        eMMC_access_semaphoreHandle = xSemaphoreCreateMutexStatic(&eMMC_access_semaphoreBuffer);
         isrTriggeredSemaphoreHandle = xSemaphoreCreateBinaryStatic(&isrTriggeredSemaphoreBuffer);
 
-        if (eMMC_semaphoreHandle == nullptr || isrTriggeredSemaphoreHandle == nullptr) {
+        if (eMMC_access_semaphoreHandle == nullptr || isrTriggeredSemaphoreHandle == nullptr) {
             return etl::unexpected(Error::EMMC_FREERTOS_RESOURCE_INITIALIZATION_FAILED);
         }
 
@@ -175,6 +175,22 @@ namespace eMMC {
         return {}; // success
     }
 
+    etl::expected<void, Error> eMMC_Utilities::resetItem(MemoryItem item) {
+        const MemoryItemHandler& itemHandler = memoryItemMap[item];
+        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
+
+        etl::expected<void, Error> status = eraseBlocksEMMC(itemHandler.startBlockAddress, itemHandler.endBlockAddress);
+        if (!status.has_value()) {
+            xSemaphoreGive(itemHandler.semaphoreHandle);
+            return status;
+        }
+
+        xSemaphoreGive(itemHandler.semaphoreHandle);
+        return {};
+    }
+
     etl::pair<uint32_t, Error> eMMC_Utilities::popItemsFromQueue(const MemoryQueue queue, uint8_t* destBuffer, const uint32_t bufferSize, const uint32_t numItems) {
         MemoryQueueHandler& queueHandler = memoryQueueMap[queue];
         if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
@@ -309,9 +325,28 @@ namespace eMMC {
         return etl::make_pair(itemsToPush, Error::EMMC_NO_ERROR);
     }
 
-    etl::expected<void, Error> eMMC_Utilities::readBlockEMMC(uint8_t* destBuffer, const uint32_t block_address, const uint32_t numberOfBlocks)
-    {
-        if (xSemaphoreTake(eMMC_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+    etl::expected<void, Error> eMMC_Utilities::resetQueue(MemoryQueue queue) {
+        MemoryQueueHandler& queueHandler = memoryQueueMap[queue];
+        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+            return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
+        }
+
+        etl::expected<void, Error> status = eraseBlocksEMMC(queueHandler.startBlockAddress, queueHandler.endBlockAddress);
+        if (!status.has_value()) {
+            xSemaphoreGive(queueHandler.semaphoreHandle);
+            return status;
+        }
+
+        queueHandler.currentNumberOfItems = 0;
+        queueHandler.headSlotPointer = 0;
+        queueHandler.tailSlotPointer = 0;
+
+        xSemaphoreGive(queueHandler.semaphoreHandle);
+        return {};
+    }
+
+    etl::expected<void, Error> eMMC_Utilities::readBlockEMMC(uint8_t* destBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
+        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -320,46 +355,46 @@ namespace eMMC {
         transactionAborted = false;
 
         if (HAL_MMC_ReadBlocks_IT(hmmc, destBuffer, block_address, numberOfBlocks) != HAL_OK) {
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_READ_FAILURE);
         }
-        //
-        // if (HAL_MMC_GetCardState(hmmc) != HAL_OK) {
-        //         return etl::unexpected(Error::EMMC_READ_FAILURE);
-        // }
 
         if (xSemaphoreTake(isrTriggeredSemaphoreHandle, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) != pdTRUE) {
             // timed out
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
         }
 
         if (readComplete) {
-            // success
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
+
+            if (status != HAL_MMC_CARD_READY) {
+                return etl::unexpected(Error::EMMC_READ_FAILURE);
+            }
             return {};
         }
 
         if (errorOccured) {
             // error callback was called
             /// TODO: handle the error, check hmmc handle for error messages.
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_READ_FAILURE);
         }
 
         if (transactionAborted) {
             // abort callback was called
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
         }
 
         // unknown error
-        xSemaphoreGive(eMMC_semaphoreHandle);
+        xSemaphoreGive(eMMC_access_semaphoreHandle);
         return etl::unexpected(Error::EMMC_READ_FAILURE);
     }
 
     etl::expected<void, Error> eMMC_Utilities::writeBlockEMMC(const uint8_t* sourceBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
-        if (xSemaphoreTake(eMMC_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -368,60 +403,66 @@ namespace eMMC {
         transactionAborted = false;
 
         if (HAL_MMC_WriteBlocks_IT(hmmc, sourceBuffer, block_address, numberOfBlocks) != HAL_OK) {
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
 
-        // if (HAL_MMC_GetCardState(hmmc) != HAL_OK) {
-        //     return etl::unexpected(Error::EMMC_WRITE_FAILURE);
-        // }
-
         if (xSemaphoreTake(isrTriggeredSemaphoreHandle, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) != pdTRUE) {
             // timed out
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
         }
 
         if (writeComplete) {
-            // success
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
+
+            if (status != HAL_MMC_CARD_READY) {
+              return etl::unexpected(Error::EMMC_WRITE_FAILURE);
+            }
             return {};
         }
 
         if (errorOccured) {
             // error callback was called
             /// TODO: handle the error, check hmmc handle for error messages.
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
 
         if (transactionAborted) {
             // abort callback was called
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
         }
 
         // unknown error
-        xSemaphoreGive(eMMC_semaphoreHandle);
+        xSemaphoreGive(eMMC_access_semaphoreHandle);
         return etl::unexpected(Error::EMMC_WRITE_FAILURE);
     }
 
     etl::expected<void, Error> eMMC_Utilities::eraseBlocksEMMC(const uint32_t block_address_start, const  uint32_t block_address_end) {
-        if (xSemaphoreTake(eMMC_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
         if (block_address_start > block_address_end) {
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_INVALID_MEMORY_BLOCK_REGION);
         }
 
         if (HAL_MMC_Erase(hmmc, block_address_start, block_address_end) != HAL_OK) {
-            xSemaphoreGive(eMMC_semaphoreHandle);
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_ERASE_BLOCK_FAILURE);
         }
 
-        xSemaphoreGive(eMMC_semaphoreHandle);
+        HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
+        if (status != HAL_MMC_CARD_READY) {
+            xSemaphoreGive(eMMC_access_semaphoreHandle);
+            return etl::unexpected(Error::EMMC_WRITE_FAILURE);
+        }
+
+        xSemaphoreGive(eMMC_access_semaphoreHandle);
         return {}; // success
     }
 } // namespace eMMC
