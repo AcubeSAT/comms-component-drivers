@@ -104,6 +104,11 @@ namespace eMMC {
         // TODO this function would make sense if the item is very large and has to be partially copied, but we dont need this right now
         etl::expected<void, Error> storeItem(MemoryItem item, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t startBlock, uint32_t numOfBlocks);
 
+        /**
+         * Debugging function. Erases the data of that specific item.
+         */
+        etl::expected<void, Error> resetItem(MemoryItem item);
+
         /** Queue interface **/
         bool isQueueEmpty(const MemoryQueue queue) {
             return memoryQueueMap[queue].currentNumberOfItems == 0;
@@ -140,14 +145,10 @@ namespace eMMC {
         etl::pair<uint32_t, Error> pushItemsToQueue(MemoryQueue queue, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t numItems);
 
         /**
-         * @brief Utility function. Write to eMMC blocks.
+         * Debugging function. Erases the data of that specific queue.
          */
-        etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+        etl::expected<void, Error> resetQueue(MemoryQueue queue);
 
-        /**
-         * @brief Utility function. Read from eMMC blocks.
-         */
-        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
     private:
         /**
          * Size parameters for the SDINBDG4-8G
@@ -161,8 +162,8 @@ namespace eMMC {
          * Transaction handling parameters
          */
         MMC_HandleTypeDef *hmmc;
-        SemaphoreHandle_t eMMC_semaphoreHandle; // for concurrent access protection to the EMMC peripheral itself
-        StaticSemaphore_t eMMC_semaphoreBuffer;
+        SemaphoreHandle_t eMMC_access_semaphoreHandle; // for concurrent access protection to the EMMC peripheral itself
+        StaticSemaphore_t eMMC_access_semaphoreBuffer;
         StaticSemaphore_t isrTriggeredSemaphoreBuffer;
         uint32_t transactionTimeoutPerBlock = 100; // ms
         uint32_t semaphoreTimeout = 1000;       // ms
@@ -212,6 +213,16 @@ namespace eMMC {
         };
 
         etl::array<MemoryQueueHandler, memoryQueueCount> memoryQueueMap;
+
+        /**
+         * @brief Utility function. Write to eMMC blocks.
+         */
+        etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+
+        /**
+         * @brief Utility function. Read from eMMC blocks.
+         */
+        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
 
         /**
          * @brief Erases specified memory region from eMMC
