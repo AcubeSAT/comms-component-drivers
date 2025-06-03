@@ -10,9 +10,11 @@ namespace eMMC {
         hmmc = handle;
 
         eMMC_access_semaphoreHandle = xSemaphoreCreateMutexStatic(&eMMC_access_semaphoreBuffer);
-        isrTriggeredSemaphoreHandle = xSemaphoreCreateBinaryStatic(&isrTriggeredSemaphoreBuffer);
 
-        if (eMMC_access_semaphoreHandle == nullptr || isrTriggeredSemaphoreHandle == nullptr) {
+        // Initialize the event group
+        eventGroupHandle = xEventGroupCreateStatic(&eventGroupBuffer);
+
+        if (eMMC_access_semaphoreHandle == nullptr || eventGroupHandle == nullptr) {
             return etl::unexpected(Error::EMMC_FREERTOS_RESOURCE_INITIALIZATION_FAILED);
         }
 
@@ -350,46 +352,49 @@ namespace eMMC {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
-        readComplete = false;
-        errorOccured = false;
-        transactionAborted = false;
+        // reset event bits
+        xEventGroupClearBits(eventGroupHandle, readCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit);
 
         if (HAL_MMC_ReadBlocks_IT(hmmc, destBuffer, block_address, numberOfBlocks) != HAL_OK) {
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_READ_FAILURE);
         }
 
-        if (xSemaphoreTake(isrTriggeredSemaphoreHandle, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) != pdTRUE) {
+        // wait until an interrupt occurs
+        uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
+            readCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit,
+            pdFALSE, pdFALSE, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks));
+
+        if (!eventBits) {
             // timed out
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
         }
 
-        if (readComplete) {
+        if (eventBits & readCompleteGroupBit) {
             HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
             xSemaphoreGive(eMMC_access_semaphoreHandle);
-
-            if (status != HAL_MMC_CARD_READY) {
+            LOG_DEBUG << status;
+            if (status ==  HAL_MMC_CARD_ERROR) {
                 return etl::unexpected(Error::EMMC_READ_FAILURE);
             }
             return {};
         }
 
-        if (errorOccured) {
+        if (eventBits & errorOccuredGroupBit) {
             // error callback was called
             /// TODO: handle the error, check hmmc handle for error messages.
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_READ_FAILURE);
         }
 
-        if (transactionAborted) {
+        if (eventBits & transactionAbortedGroupBit) {
             // abort callback was called
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
         }
 
-        // unknown error
-        xSemaphoreGive(eMMC_access_semaphoreHandle);
+        // the code should not reach here
         return etl::unexpected(Error::EMMC_READ_FAILURE);
     }
 
@@ -398,46 +403,49 @@ namespace eMMC {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
-        writeComplete = false;
-        errorOccured = false;
-        transactionAborted = false;
+        // reset event bits
+        xEventGroupClearBits(eventGroupHandle, writeCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit);
 
         if (HAL_MMC_WriteBlocks_IT(hmmc, sourceBuffer, block_address, numberOfBlocks) != HAL_OK) {
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
 
-        if (xSemaphoreTake(isrTriggeredSemaphoreHandle, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks)) != pdTRUE) {
+        // wait until an interrupt occurs
+        uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
+            writeCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit,
+            pdFALSE, pdFALSE, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks));
+
+        if (!eventBits) {
             // timed out
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_TRANSACTION_TIMED_OUT);
         }
 
-        if (writeComplete) {
+        if (eventBits & writeCompleteGroupBit) {
             HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
             xSemaphoreGive(eMMC_access_semaphoreHandle);
 
-            if (status != HAL_MMC_CARD_READY) {
+            if (status ==  HAL_MMC_CARD_ERROR) {
               return etl::unexpected(Error::EMMC_WRITE_FAILURE);
             }
             return {};
         }
 
-        if (errorOccured) {
+        if (eventBits & errorOccuredGroupBit) {
             // error callback was called
             /// TODO: handle the error, check hmmc handle for error messages.
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
 
-        if (transactionAborted) {
+        if (eventBits & transactionAbortedGroupBit) {
             // abort callback was called
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_TRANSACTION_ABORTED);
         }
 
-        // unknown error
-        xSemaphoreGive(eMMC_access_semaphoreHandle);
+        // the code should not reach here
         return etl::unexpected(Error::EMMC_WRITE_FAILURE);
     }
 
@@ -457,7 +465,7 @@ namespace eMMC {
         }
 
         HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
-        if (status != HAL_MMC_CARD_READY) {
+        if (status ==  HAL_MMC_CARD_ERROR) {
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }

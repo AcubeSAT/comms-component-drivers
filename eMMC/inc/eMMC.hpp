@@ -4,6 +4,7 @@
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "etl/expected.h"
+#include "event_groups.h"
 
 namespace eMMC {
     /**
@@ -52,18 +53,13 @@ namespace eMMC {
 
     class eMMC_Utilities {
     public:
-        /**
-         * Used by the ISRs to state the status of the transfer
-         */
-        volatile bool writeComplete = false;
-        volatile bool readComplete = false;
-        volatile bool errorOccured = false;
-        volatile bool transactionAborted = false;
-
-        /**
-         * Used by the ISRs to indicate about the a transfer event
-         */
-         SemaphoreHandle_t isrTriggeredSemaphoreHandle;
+        /// "External" event group bits. The user must trigger these events from the proper mmc ISRs
+        static constexpr uint32_t writeCompleteGroupBit            = 1U << 0;
+        static constexpr uint32_t readCompleteGroupBit             = 1U << 1;
+        static constexpr uint32_t errorOccuredGroupBit             = 1U << 2;
+        static constexpr uint32_t transactionAbortedGroupBit       = 1U << 3;
+        EventGroupHandle_t eventGroupHandle;
+        StaticEventGroup_t eventGroupBuffer;
 
         eMMC_Utilities() = default;
 
@@ -149,6 +145,15 @@ namespace eMMC {
          */
         etl::expected<void, Error> resetQueue(MemoryQueue queue);
 
+        /**
+         * @brief Utility function. Write to eMMC blocks.
+         */
+        etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+
+        /**
+         * @brief Utility function. Read from eMMC blocks.
+         */
+        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
     private:
         /**
          * Size parameters for the SDINBDG4-8G
@@ -213,16 +218,6 @@ namespace eMMC {
         };
 
         etl::array<MemoryQueueHandler, memoryQueueCount> memoryQueueMap;
-
-        /**
-         * @brief Utility function. Write to eMMC blocks.
-         */
-        etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
-
-        /**
-         * @brief Utility function. Read from eMMC blocks.
-         */
-        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
 
         /**
          * @brief Erases specified memory region from eMMC
