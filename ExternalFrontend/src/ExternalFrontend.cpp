@@ -31,17 +31,35 @@ namespace ExternalFrontend {
 
     bool ExternalFrontendUtilities::enableUhfRxFrontend(bool agcEnabled, float setPointVlt) {
         if (!rxUhfActive) {
-            // clip negative or too large values
-            if (setPointVlt < 0) {
-                setPointVlt = 0;
-            }
+            // clip out of range values
+            if (agcEnabled) {
+                if (setPointVlt < MinSetPointVoltageAGCMode) {
+                    setPointVlt = MinSetPointVoltageAGCMode;
+                }
 
-            if (setPointVlt > MaxSetPointVoltage) {
-                setPointVlt = MaxSetPointVoltage;
+                if (setPointVlt > MaxSetPointVoltageAGCMode) {
+                    setPointVlt = MaxSetPointVoltageAGCMode;
+                }
+            } else {
+                if (setPointVlt < MinSetPointVoltageAmplifierMode) {
+                    setPointVlt = MinSetPointVoltageAmplifierMode;
+                }
+
+                if (setPointVlt > MaxSetPointVoltageAmplifierMode) {
+                    setPointVlt = MaxSetPointVoltageAmplifierMode;
+                }
             }
 
             // Store the value that is written to the DAC for future usage. It is assumed that the resolution is 12bits
             userSetPointVoltage = (setPointVlt / ReferenceVoltage) * 4096.0F;
+
+            // switch in the AGC (if requested)
+            agcSwitchedIn = agcEnabled;
+            if (agcEnabled) {
+                HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_RESET);
+            } else {
+                HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_SET);
+            }
 
             // Calibrate and enable setpoint voltage dac and gain adc here. The calibration is necessary to do each time,
             // so that the large temperature variations do not affect the results. The activation is also done here,
@@ -66,14 +84,6 @@ namespace ExternalFrontend {
             HAL_GPIO_WritePin(EN_RX_UHF_GPIO_Port, EN_RX_UHF_Pin, GPIO_PIN_RESET);
             // enable the AMPLIFIER, LNA and the AGC (active high logic)
             HAL_GPIO_WritePin(EN_UHF_AMP_RX_GPIO_Port, EN_UHF_AMP_RX_Pin, GPIO_PIN_SET);
-
-            // switch in the AGC (if requested)
-            agcSwitchedIn = agcEnabled;
-            if (agcEnabled) {
-                HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_RESET);
-            } else {
-                HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_SET);
-            }
 
             // wait for all components to activate
             vTaskDelay(pdMS_TO_TICKS(TurnOnDelayMs));
@@ -166,9 +176,12 @@ namespace ExternalFrontend {
         }
 
         const uint32_t adcVoltage = HAL_ADC_GetValue(hadcGain);
+        // calculate downscaled voltage
+        const float adcVoltageFloatDownscaled = (static_cast<float>(adcVoltage) / 4096.0F) * ReferenceVoltage * agcOutVoltageDownscaleFactor;
+        const uint32_t adcVoltageDownscaled = (adcVoltageFloatDownscaled / ReferenceVoltage) * 4096.0F;
 
-        // use it as the new setpoint voltage
-        HAL_DAC_SetValue(hdacSetpointVoltage, DAC_CHANNEL_2, DAC_ALIGN_12B_R,adcVoltage);
+        // use it as the new setpoint voltage (
+        HAL_DAC_SetValue(hdacSetpointVoltage, DAC_CHANNEL_2, DAC_ALIGN_12B_R,adcVoltageDownscaled);
 
         // ensure the value is set correctly
         if (HAL_DAC_GetValue(hdacSetpointVoltage, DAC_CHANNEL_2) != adcVoltage) {

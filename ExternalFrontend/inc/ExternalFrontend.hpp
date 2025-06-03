@@ -41,10 +41,10 @@ namespace ExternalFrontend {
          * @param agcEnabled   Whether the AGC will be used to drive the amplifier.
          * @param userSetPointVoltage This parameter should be interpreted as follows:
          *                        agcEnabled == False: Sets a constant amplifier gain. Look TYPICAL PERFORMANCE CHARACTERISTICS
-         *                        section of the ADL5330 datasheet.
+         *                        section of the ADL5330 datasheet. Values outside the 0.5-2.1 V range are clipped
          *                        agcEnabled == True: The AGC tries to match it's input voltage (a fraction of
-         *                        the amplifier's output voltage) with setPointVoltage.
-         *                        In any case, the maximum value  should be between 0 and MaxSetPointVoltage. An out of bounds value is clipped.
+         *                        the amplifier's output voltage) with setPointVoltage. Values outside of the 0.1-1.4V
+         *                        range are clipped.
          *
          * @returns Whether the operation succeeded or not.
          */
@@ -111,7 +111,15 @@ namespace ExternalFrontend {
         static constexpr uint16_t GainAGCConversionMaxDelayMs = 15;
         static constexpr uint16_t TurnOnDelayMs = 15; // turn on delay for the frontends (dominated by the current limiter, which needs 10.2 ms to open)
 
-        static constexpr float MaxSetPointVoltage = 1.4F;
+        /// Setpoint voltage boundaries (obtained from specification tables of the ADL5330, AD8318 datasheets)
+        static constexpr float MinSetPointVoltageAGCMode = 0.5F; // agc enabled
+        static constexpr float MaxSetPointVoltageAGCMode = 2.1F;
+        static constexpr float MinSetPointVoltageAmplifierMode = 0.1F; // agc disabled
+        static constexpr float MaxSetPointVoltageAmplifierMode = 1.4F;
+
+        /// The AGC outputs a 0-5V signal to control the amplifier, which expects a signal to the range of 0.1-1.4V.
+        /// In order to not saturate the amplifier, a resistor divider network downscales the voltage
+        static constexpr float agcOutVoltageDownscaleFactor = 0.28F;
 
         static constexpr float ReferenceVoltage = 3.28;  // VDDA
 
