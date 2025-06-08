@@ -9,7 +9,7 @@ namespace ExternalFrontend {
     ExternalFrontendUtilities externalFrontendUtils = ExternalFrontend::ExternalFrontendUtilities();
 
     void ExternalFrontendUtilities::initializeResources(ADC_HandleTypeDef* hadc_Temp, ADC_HandleTypeDef* hadc_Gain,
-                                  DAC_HandleTypeDef* hdac_SetpointVoltage) {
+                                  DAC_HandleTypeDef* hdac_SetpointVoltage, uint32_t dac_channel_number) {
         txUhfActive = false;
         rxUhfActive = false;
         sbandActive = false;
@@ -17,6 +17,7 @@ namespace ExternalFrontend {
         hadcTemp = hadc_Temp;
         hadcGain = hadc_Gain;
         hdacSetpointVoltage = hdac_SetpointVoltage;
+        dacChannelNumber = dac_channel_number;
 
         HAL_GPIO_WritePin(EN_PA_UHF_GPIO_Port, EN_PA_UHF_Pin, GPIO_PIN_SET);
         HAL_GPIO_WritePin(EN_UHF_AMP_RX_GPIO_Port, EN_UHF_AMP_RX_Pin, GPIO_PIN_RESET);
@@ -24,7 +25,7 @@ namespace ExternalFrontend {
         HAL_GPIO_WritePin(EN_S_BAND_TX_GPIO_Port, EN_S_BAND_TX_Pin, GPIO_PIN_SET);
 
         // ensure DAC and ADCs are closed
-        HAL_DAC_Stop(hdacSetpointVoltage, DAC_CHANNEL_2);
+        HAL_DAC_Stop(hdacSetpointVoltage, dacChannelNumber);
         HAL_ADC_Stop(hadcGain);
         HAL_ADC_Stop(hadcTemp);
     }
@@ -70,13 +71,13 @@ namespace ExternalFrontend {
             HAL_ADC_Start(hadcGain);
 
             DAC_ChannelConfTypeDef sConfig = {0}; // this struct is used by the function just to return the trimming value (we dont need it anywhere else)
-            if (HAL_DACEx_SelfCalibrate(hdacSetpointVoltage, &sConfig, DAC_CHANNEL_2) != HAL_OK) {
+            if (HAL_DACEx_SelfCalibrate(hdacSetpointVoltage, &sConfig, dacChannelNumber) != HAL_OK) {
                 return false;
             }
-            HAL_DAC_Start(hdacSetpointVoltage, DAC_CHANNEL_2);
-            HAL_DAC_SetValue(hdacSetpointVoltage, DAC_CHANNEL_2, DAC_ALIGN_12B_R,userSetPointVoltage);
+            HAL_DAC_Start(hdacSetpointVoltage, dacChannelNumber);
+            HAL_DAC_SetValue(hdacSetpointVoltage, dacChannelNumber, DAC_ALIGN_12B_R,userSetPointVoltage);
             // ensure the value is set correctly
-            if (HAL_DAC_GetValue(hdacSetpointVoltage, DAC_CHANNEL_2) != userSetPointVoltage) {
+            if (HAL_DAC_GetValue(hdacSetpointVoltage, dacChannelNumber) != userSetPointVoltage) {
                 return false;
             }
 
@@ -118,7 +119,7 @@ namespace ExternalFrontend {
             // disable the AMPLIFIER, LNA and the AGC (active high logic)
             HAL_GPIO_WritePin(EN_UHF_AMP_RX_GPIO_Port, EN_UHF_AMP_RX_Pin, GPIO_PIN_RESET);
             // disable dac and adc
-            HAL_DAC_Stop(hdacSetpointVoltage, DAC_CHANNEL_2);
+            HAL_DAC_Stop(hdacSetpointVoltage, dacChannelNumber);
             HAL_ADC_Stop(hadcGain);
             rxUhfActive = false;
         }
@@ -176,15 +177,12 @@ namespace ExternalFrontend {
         }
 
         const uint32_t adcVoltage = HAL_ADC_GetValue(hadcGain);
-        // calculate downscaled voltage
-        const float adcVoltageFloatDownscaled = (static_cast<float>(adcVoltage) / 4096.0F) * ReferenceVoltage * agcOutVoltageDownscaleFactor;
-        const uint32_t adcVoltageDownscaled = (adcVoltageFloatDownscaled / ReferenceVoltage) * 4096.0F;
 
-        // use it as the new setpoint voltage (
-        HAL_DAC_SetValue(hdacSetpointVoltage, DAC_CHANNEL_2, DAC_ALIGN_12B_R,adcVoltageDownscaled);
+        // use it as the new setpoint voltage
+        HAL_DAC_SetValue(hdacSetpointVoltage, dacChannelNumber, DAC_ALIGN_12B_R,adcVoltage);
 
         // ensure the value is set correctly
-        if (HAL_DAC_GetValue(hdacSetpointVoltage, DAC_CHANNEL_2) != adcVoltage) {
+        if (HAL_DAC_GetValue(hdacSetpointVoltage, dacChannelNumber) != adcVoltage) {
             return false;
         }
 
@@ -199,10 +197,10 @@ namespace ExternalFrontend {
         }
 
         // use the defined setpoint voltage
-        HAL_DAC_SetValue(hdacSetpointVoltage, DAC_CHANNEL_2, DAC_ALIGN_12B_R,userSetPointVoltage);
+        HAL_DAC_SetValue(hdacSetpointVoltage, dacChannelNumber, DAC_ALIGN_12B_R,userSetPointVoltage);
 
         // ensure the value is set correctly
-        if (HAL_DAC_GetValue(hdacSetpointVoltage, DAC_CHANNEL_2) != userSetPointVoltage) {
+        if (HAL_DAC_GetValue(hdacSetpointVoltage, dacChannelNumber) != userSetPointVoltage) {
             return false;
         }
 
