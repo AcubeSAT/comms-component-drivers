@@ -362,6 +362,109 @@ namespace AT86RF215 {
         return energyMeasurement;
     }
 
+    void At86rf215_Utilities::transmitCarrier(Transceiver transceiver, Error& err) {
+        err = Error::NO_ERRORS;
+
+        // wait for the requested transceiver to become available and lock it
+        uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
+        uint32_t transceiverUnoccupiedDelayMs = transceiver == RF09 ? transceiverUnoccupied09DelayMs : transceiverUnoccupied24DelayMs;
+        if ((xEventGroupWaitBits(eventGroupHandle, transceiverUnoccupiedGroupBit,
+                                 pdTRUE, pdFALSE, pdMS_TO_TICKS(transceiverUnoccupiedDelayMs)) & transceiverUnoccupiedGroupBit) == 0) {
+            err = Error::ONGOING_TRANSMISSION_RECEPTION;
+            return;
+        }
+
+        if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
+            err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
+
+        // helper function to handle errors for spi_write(), spi_read() and change_state_private()
+        auto handleError = [&](Error& error) -> bool {
+            if (err != Error::NO_ERRORS) {
+                xSemaphoreGive(spiAccessMutexHandle);
+                xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+                return true; // Error occurred
+            }
+            return false; // No error
+        };
+
+        // setup transceiver as shown in table 13-2
+        RegisterAddress iqfc0_reg = RF_IQIFC0;
+        RegisterAddress pc_reg;
+        RegisterAddress txfhl_reg;
+        RegisterAddress txfll_reg;
+        RegisterAddress txdaci_reg;
+        RegisterAddress txdacq_reg;
+
+        if (transceiver == RF09) {
+            pc_reg = BBC0_PC;
+            txfhl_reg = BBC0_TXFLH;
+            txfll_reg = BBC0_TXFLL;
+            txdaci_reg = RF09_TXDACI;
+            txdacq_reg = RF09_TXDACQ;
+        } else {
+            pc_reg = BBC1_PC;
+            txfhl_reg = BBC1_TXFLH;
+            txfll_reg = BBC1_TXFLL;
+            txdaci_reg = RF24_TXDACI;
+            txdacq_reg = RF24_TXDACQ;
+        }
+
+        const uint8_t iqfc0_val = spi_read_8(iqfc0_reg, err);
+        if (handleError(err)) { return; }
+
+        const uint8_t pc_val = spi_read_8(pc_reg, err);
+        if (handleError(err)) { return; }
+
+        const uint8_t txfhl_val = spi_read_8(txfhl_reg, err);
+        if (handleError(err)) { return; }
+
+        const uint8_t txfll_val = spi_read_8(txfll_reg, err);
+        if (handleError(err)) { return; }
+
+        set_state_private(transceiver, State::RF_TRXOFF, err);
+        if (handleError(err)) { return; }
+
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||
+            (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||
+            (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09)) {
+            // The respective baseband core is active. Transmit using CTX (continuous transmit)
+            spi_write_8(pc_reg, pc_val | 0x80, err);       // CTX = 1
+            if (handleError(err)) { return; }
+
+            spi_write_8(txfhl_reg, 0x07, err);             // any length will do
+            if (handleError(err)) { return; }
+
+            spi_write_8(txfll_reg, 0xFF, err);
+            if (handleError(err)) { return; }
+
+        } else {
+            // Transmit using only the radio. EEC needs to be temporarily turned off, in order to
+            // be able to control TXPREP-TX transitions manually
+            spi_write_8(iqfc0_reg,  iqfc0_val & 0xFE, err);
+            if (handleError(err)) { return; }
+        }
+
+        spi_write_8(txdaci_reg, 0x80 | 0x7E, err); // enable in-phase DAC overwrite with max amplitude
+        if (handleError(err)) { return; }
+
+        spi_write_8(txdacq_reg, 0x80 | 0x3F, err); // enable quadrature-phase DAC overwrite with min amplitude
+        if (handleError(err)) { return; }
+
+        set_state_private(transceiver, State::RF_TXPREP, err);
+        if (handleError(err)) { return; }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        set_state_private(transceiver, State::RF_TX, err);
+        if (handleError(err)) { return; }
+
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+        xSemaphoreGive(spiAccessMutexHandle);
+    }
+
     // TODO: Upon reaching RX state
     // wait 8μs + RXDFE.SR + Tu
     // read rssi
