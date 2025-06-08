@@ -914,6 +914,12 @@ namespace AT86RF215 {
     void At86rf215_Utilities::enableIQLoopbackMode(Error& err) {
         err = Error::NO_ERRORS;
 
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF){
+            err = Error::INVALID_CHIP_MODE;
+            xSemaphoreGive(spiAccessMutexHandle);
+            return;
+        }
+
         if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
             err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
