@@ -17,7 +17,7 @@ namespace ExternalFrontend {
          * @note All chains will be set to inactive by default.
          */
         void initializeResources(ADC_HandleTypeDef* hadc_Temp, ADC_HandleTypeDef* hadc_Gain,
-                                  DAC_HandleTypeDef* hdac_SetpointVoltage);
+                                  DAC_HandleTypeDef* hdac_SetpointVoltage, uint32_t dac_channel_number);
 
         /// Flags that get set to true from a callback, in case the current limiters FLAGB pin goes
         ///  LOW, due to output overcurrent, input undervoltage or overheating.
@@ -105,6 +105,7 @@ namespace ExternalFrontend {
         ADC_HandleTypeDef* hadcTemp;            // ADC handle for reading temperature pin of AGC
         ADC_HandleTypeDef* hadcGain;            // ADC handle for reading the current gain of the agc
         DAC_HandleTypeDef* hdacSetpointVoltage; // DAC handle for writing the setpoint voltage
+        uint32_t dacChannelNumber;
 
         /// Delays for waiting
         static constexpr uint16_t TempConversionMaxDelayMs = 15;
@@ -116,10 +117,6 @@ namespace ExternalFrontend {
         static constexpr float MaxSetPointVoltageAGCMode = 2.1F;
         static constexpr float MinSetPointVoltageAmplifierMode = 0.1F; // agc disabled
         static constexpr float MaxSetPointVoltageAmplifierMode = 1.4F;
-
-        /// The AGC outputs a 0-5V signal to control the amplifier, which expects a signal to the range of 0.1-1.4V.
-        /// In order to not saturate the amplifier, a resistor divider network downscales the voltage
-        static constexpr float agcOutVoltageDownscaleFactor = 0.28F;
 
         static constexpr float ReferenceVoltage = 3.28;  // VDDA
 
