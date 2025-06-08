@@ -194,6 +194,12 @@ namespace AT86RF215 {
         int8_t clear_channel_assessment(Transceiver transceiver, etl::optional<ReceiverBandwidth> bw, Error& err);
 
         /**
+         *  Start transmitting a pure sine wave at the config frequency
+         *  @warning Use this function only for debugging only
+         */
+        void transmitCarrier(Transceiver transceiver, Error& err);
+
+        /**
          * Transmit a packet using the baseband core.
          *
          * @param transceiver		Specifies the transceiver used

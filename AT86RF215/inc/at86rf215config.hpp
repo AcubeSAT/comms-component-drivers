@@ -449,7 +449,7 @@ namespace AT86RF215 {
         }
 
         // Frequency must be given in kHz. If the given frequency and channel mode are incompatible
-        // with the given tranceiver, the validConfig flag will be set to false.
+        // with the given transceiver, the validConfig flag will be set to false.
         void setup_FrequencySynthesizer(Transceiver transceiver, uint32_t frequency, PLLChannelMode channelMode, PLLBandwidth bw) {
 
             transceiver == RF09 ? (validConfig09 = false) : (validConfig24 = false);
