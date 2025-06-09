@@ -501,8 +501,6 @@ namespace AT86RF215 {
             return {
                     .externalLNABypass09 = ExternalLNABypass::FALSE,
                     .externalLNABypass24 = ExternalLNABypass::FALSE,
-                    // @TODO uhf rx: automaticGainControl must be set from the freertos task to be the same (or close) to the external AGC's gain
-                    // @TODO external agc gain is set by mcu pins, and apparently fpga pins also get involved. the mcu pins are not configured yet
                     .automaticGainControlMAP09 = AutomaticGainControlMAP::INTERNAL_AGC,
                     .automaticGainControlMAP24 = AutomaticGainControlMAP::INTERNAL_AGC,
                     .analogVoltageEnable09 = AnalogVoltageEnable::ENABLED,
