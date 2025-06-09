@@ -41,11 +41,12 @@ namespace ExternalFrontend {
          * @param agcEnabled   Whether the AGC will be used to drive the amplifier.
          * @param userSetPointVoltage This parameter should be interpreted as follows:
          *                        agcEnabled == False: Sets a constant amplifier gain. Look TYPICAL PERFORMANCE CHARACTERISTICS
-         *                        section of the ADL5330 datasheet. Values outside the 0.5-2.1 V range are clipped
+         *                        section of the ADL5330 datasheet. Values outside the 0.1-1.4 V range are clipped
          *                        agcEnabled == True: The AGC tries to match it's input voltage (a fraction of
-         *                        the amplifier's output voltage) with setPointVoltage. Values outside of the 0.1-1.4V
+         *                        the amplifier's output voltage) with setPointVoltage. Values outside of the 0.5-2.1V
          *                        range are clipped.
          *
+         *  TODO take measurements and create a Pout(dBm)-Vsetpoint(V) characteristic
          * @returns Whether the operation succeeded or not.
          */
         [[nodiscard]] bool enableUhfRxFrontend(bool agcEnabled = false, float userSetPointVoltage = 0.9);
