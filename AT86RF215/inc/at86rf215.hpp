@@ -44,6 +44,7 @@ namespace AT86RF215 {
         FREERTOS_RESOURCE_INITIALIZATION_FAILED,
         INVALID_CHIP_MODE,
         RX_WAIT_TIMEOUT,
+        EMBEDDED_CONTROL_DISABLED,
     };
 
     inline uint8_t operator&(const uint8_t a, InterruptMask b) {
@@ -63,16 +64,12 @@ namespace AT86RF215 {
         const uint16_t transceiverUnoccupied09DelayMs     = 100;
         const uint16_t transceiverUnoccupied24DelayMs     = 100;
         const uint16_t iqEecTransmissionComplete09DelayMs = 100;
-        const uint16_t iqPreambleReception09DelayMs       = 10000;
         const uint16_t iqPacketReception09DelayMs         = 100;
         const uint16_t iqEecTransmissionComplete24DelayMs = 100;
-        const uint16_t iqPreambleReception24DelayMs       = 10000;
         const uint16_t iqPacketReception24DelayMs         = 100;
         const uint16_t transceiverReadyDelayMs            = 100;
         const uint16_t basebandTx09DelayMs                = 100;
         const uint16_t basebandTx24DelayMs                = 100;
-        const uint16_t basebandRx09DelayMs                = 10000;
-        const uint16_t basebandRx24DelayMs                = 10000;
         const uint16_t energyDetCompletion09DelayMs       = 100;
         const uint16_t energyDetCompletion24DelayMs       = 100;
 
@@ -191,7 +188,7 @@ namespace AT86RF215 {
          *                          measurement will take place in the already set bandwidth.
          * @returns                 The average power in dBm. The range of possible values is -127..4 dBm
          */
-        int8_t clear_channel_assessment(Transceiver transceiver, etl::optional<ReceiverBandwidth> bw, Error& err);
+        int8_t singleShotEnergyMeasurement(Transceiver transceiver, etl::optional<ReceiverBandwidth> bw, Error& err);
 
         /**
          *  Start transmitting a pure sine wave at the config frequency
@@ -233,16 +230,16 @@ namespace AT86RF215 {
          * Waits for packet reception. The packet is written to the registered buffer from
          * the preparePacketReceptionBaseband() call.
          *
+         * @param timeoutDelayMs Defines how long the function should wait for a packet before it returns.
+         *
+         * @note A 'RX_WAIT_TIMEOUT' error will be returned if the functions returns because of timeout
+         *
          * @note The actual copying of the reception packet happens in handle_irq(), when a "receiver frame
          *       end interrupt" arrives. All this function does is return the packet length, once the reception is
          *       complete.
-         *
-         * @note The function may return with a RX_WAIT_TIMEOUT error. This does not indicate that
-         *       something went wrong in the process, just that the defined timeout period has ended.
-         *
          * @returns The received packet length. In case of an error, 0 is returned.
          */
-        uint16_t waitForPacketReceptionBaseband(Transceiver transceiver, Error &err);
+        uint16_t waitForPacketReceptionBaseband(Transceiver transceiver, uint32_t timeoutDelayMs, Error &err);
 
         /**
          * Set the transceiver to state TX_PREP and set the transceiverOccupied event bit, so that
@@ -252,9 +249,9 @@ namespace AT86RF215 {
          *       the transceiver is automatically  set to state TX, by the external baseband processor.
          *       This is achieved by sending I_DATA[0] == 1 through the I/Q interface (@see figure 7.6 of datasheet).
          *
-         * @warning There is only a single I/Q interface for sending packets, shared between radios. This means
-         *          that for the chip mode RF_BBRF, the other radio CANNOT be used during transmission and should
-         *          remain in state RF_TRXOFF. Therefore, this function will lock BOTH radios in such a scenario.
+         * @warning There is only a single I/Q interface for sending packets, shared between radios (look figure 4-8).
+         *          This means that for the chip mode RF_MODE_RF, the other radio CANNOT be used during transmission and
+         *          should remain in state RF_TRXOFF. Therefore, this function will lock BOTH radios in such a scenario.
          *
          */
         void prepareForPacketTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err);
@@ -273,7 +270,7 @@ namespace AT86RF215 {
          * I/Q interface may be performed.
          *
          * @note This function essentially sets the transceiver to state RX, but the user is
-         *       not stopped from performing an energy measurement, or a tx operation (either with
+         *       not stopped from performing a Tx operation (either with
          *       the baseband core or through the I/Q interface), meaning the
          *       transceiverOccupied event bit is not set until an actual reception occurs. The function
          *       has to be called again to re-enter the "listening" state.
@@ -284,18 +281,19 @@ namespace AT86RF215 {
         /**
          * Wait for packet reception through the I/Q interface.
          *
+         * @param timeoutDelayMs Defines how long the function should wait for a packet before it returns.
+         *
+         * @note A 'RX_WAIT_TIMEOUT' error will be returned if the functions returns because of timeout
+         *
          * @note The user needs to take the following actions externally:
          *    - set the iqPreambleReception event bit immediately after the external baseband processor
          *      detects a preamble, so that the transceiver is locked (transceiverOccupied event bit set) and the
-         *      AGC frozen.
+         *      transceiver's internal AGC frozen.
          *
          *    - set the iqPacketReception event bit once the external baseband processor fully received the
          *      packet, so that the AGC is released and the transceiverOccupied event bit is reset
-         *
-         * @note The function may return with a RX_WAIT_TIMEOUT error. This does not indicate that
-         *        something went wrong in the process, just that the defined timeout period has ended.
          */
-        void waitForPacketReceptionIQ(Transceiver transceiver, Error& err);
+        void waitForPacketReceptionIQ(Transceiver transceiver, uint32_t timeoutDelayMs, Error& err);
 
         /**
          * DEBUG FUNCTION: Set the transceiver to a state where incoming data in the LDVS interface is looped back
