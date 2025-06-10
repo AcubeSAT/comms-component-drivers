@@ -235,7 +235,7 @@ namespace AT86RF215 {
         return etl::unexpected(err);
     }
 
-    int8_t At86rf215_Utilities::clear_channel_assessment(Transceiver transceiver, etl::optional<ReceiverBandwidth> bw, Error& err) {
+    int8_t At86rf215_Utilities::singleShotEnergyMeasurement(Transceiver transceiver, etl::optional<ReceiverBandwidth> bw, Error& err) {
         err = Error::NO_ERRORS;
 
         // wait for the requested transceiver to become available and lock it
@@ -656,7 +656,7 @@ namespace AT86RF215 {
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
-    uint16_t At86rf215_Utilities::waitForPacketReceptionBaseband(Transceiver transceiver, Error &err) {
+    uint16_t At86rf215_Utilities::waitForPacketReceptionBaseband(Transceiver transceiver, uint32_t timeoutDelayMs, Error &err) {
         err = Error::NO_ERRORS;
 
         // ensure valid chip mode
@@ -676,11 +676,10 @@ namespace AT86RF215 {
 
         // wait until a new packet is received
         uint32_t basebandRxGroupBit = transceiver == RF09 ? basebandRx09GroupBit : basebandRx24GroupBit;
-        uint32_t basebandRxGroupBitDelayMs = transceiver == RF09 ? basebandRx09DelayMs : basebandRx24DelayMs;
         if ((xEventGroupWaitBits(eventGroupHandle,
                basebandRxGroupBit,
                pdTRUE, pdFALSE,
-               pdMS_TO_TICKS(basebandRxGroupBitDelayMs)) & basebandRxGroupBit) == 0) {
+               pdMS_TO_TICKS(timeoutDelayMs)) & basebandRxGroupBit) == 0) {
             err = Error::RX_WAIT_TIMEOUT;
             return 0;
         }
@@ -698,6 +697,10 @@ namespace AT86RF215 {
 
     void At86rf215_Utilities::prepareForPacketTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err) {
         err = Error::NO_ERRORS;
+
+        if (iqInterfaceConfig.embeddedControlTX == EmbeddedControlTX::DISABLED) {
+            err = Error::EMBEDDED_CONTROL_DISABLED;
+        }
 
         // ensure valid chip mode
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||                               // I/Q interface inactive
@@ -732,7 +735,7 @@ namespace AT86RF215 {
             return;
         }
 
-        // set the requested radio to RF_TXPREP (and disable the second one if the chip mode is RF_BBRF)
+        // set the requested radio to RF_TXPREP (and disable the second one if the chip mode is RF_MODE_RF)
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF) {
             set_state_private(transceiver == RF09 ? RF24 : RF09, State::RF_TRXOFF, err);
         }
@@ -751,12 +754,24 @@ namespace AT86RF215 {
     void At86rf215_Utilities::waitForPacketTransmissionIQEmbeddedControl(Transceiver transceiver, Error &err) {
         err = Error::NO_ERRORS;
 
+        if (iqInterfaceConfig.embeddedControlTX == EmbeddedControlTX::DISABLED) {
+            err = Error::EMBEDDED_CONTROL_DISABLED;
+        }
+
         // ensure valid chip mode
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF ||                               // I/Q interface inactive
             (transceiver == RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ||    // 09 IQ IF  is inactive
             (transceiver == RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ) {   // 24 IQ IF  is inactive
             err = Error::INVALID_CHIP_MODE;
             return;
+        }
+
+        uint32_t transceiverUnoccupiedGroupBits;
+        if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF) {
+            // In this scenario both radios were locked (the second one was set to state TRXOFF to avoid cross-transmission)
+            transceiverUnoccupiedGroupBits = transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit;
+        } else {
+            transceiverUnoccupiedGroupBits = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
         }
 
         // wait for the external baseband processor to end transmission
@@ -777,8 +792,7 @@ namespace AT86RF215 {
             err = Error::FAILED_CHANGING_STATE;
         }
 
-        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupied09GroupBit | transceiverUnoccupied24GroupBit);
-        xEventGroupSetBits(eventGroupHandle, transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit);
+        xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBits);
     }
 
     void At86rf215_Utilities::preparePacketReceptionIQ(Transceiver transceiver, Error &err) {
@@ -832,10 +846,12 @@ namespace AT86RF215 {
 
         set_state_private(transceiver, State::RF_RX, err);
         xSemaphoreGive(spiAccessMutexHandle);
+
+        // unlock the radio
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
 
-    void At86rf215_Utilities::waitForPacketReceptionIQ(Transceiver transceiver, Error& err) {
+    void At86rf215_Utilities::waitForPacketReceptionIQ(Transceiver transceiver, uint32_t timeoutDelayMs, Error& err) {
         err = Error::NO_ERRORS;
 
         // ensure valid chip mode
@@ -850,7 +866,6 @@ namespace AT86RF215 {
         uint32_t iqPreambleReceptionGroupBit = transceiver == RF09 ? iqPreambleReception09GroupBit : iqPreambleReception24GroupBit;
         uint32_t iqPacketReceptionGroupBit = transceiver == RF09 ? iqPacketReception09GroupBit : iqPacketReception24GroupBit;
         uint32_t transceiverUnoccupiedGroupBit = transceiver == RF09 ? transceiverUnoccupied09GroupBit : transceiverUnoccupied24GroupBit;
-        uint32_t iqPreambleReceptionDelay = transceiver == RF09 ? iqPreambleReception09DelayMs : iqPreambleReception24DelayMs;
 
         // clear up pending events from previous calls that failed
         xEventGroupClearBits(eventGroupHandle, iqPreambleReceptionGroupBit | iqPacketReceptionGroupBit);
@@ -858,7 +873,7 @@ namespace AT86RF215 {
         if ((xEventGroupWaitBits(eventGroupHandle,
                             iqPreambleReceptionGroupBit | transceiverUnoccupiedGroupBit,
                             pdTRUE, pdTRUE,
-                            pdMS_TO_TICKS(iqPreambleReceptionDelay)) & (iqPreambleReceptionGroupBit | transceiverUnoccupiedGroupBit)) == 0) {
+                            pdMS_TO_TICKS(timeoutDelayMs)) & (iqPreambleReceptionGroupBit | transceiverUnoccupiedGroupBit)) == 0) {
             err = Error::RX_WAIT_TIMEOUT;
             return;
         }
@@ -1262,6 +1277,9 @@ namespace AT86RF215 {
 
             case Error::RX_WAIT_TIMEOUT:
                 LOG_ERROR << "RX_WAIT_TIMEOUT";
+
+            case Error::EMBEDDED_CONTROL_DISABLED:
+                LOG_ERROR << "EMBEDDED_CONTROL_DISABLED";
 
             default:
                 LOG_ERROR << "UNHANDLED_ERROR";
