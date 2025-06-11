@@ -42,9 +42,15 @@ namespace eMMC {
 
     /**
      * @details Memory queue: A data structure with push and pop operations.
+     *
+     * @param reboot_persistence: A value of non-zero will make this queue "reboot persistent". This means that the
+     *                            head and tail pointers are stored at an extra "metadata block", and updated with
+     *                            every push and pop. This allows data to survive in scenarios where a reboot of the mcu
+     *                            occurs. Recommended only for long term data, due to the extra overhead of updating
+     *                            the metadata block.
      * @note Define your queues in MemoryQueues.def
      */
-#define MEMORY_QUEUE(queue_name, item_size, queue_size) queue_name,
+#define MEMORY_QUEUE(queue_name, item_size, queue_size, reboot_persistence) queue_name,
     enum MemoryQueue {
 #include "MemoryQueues.def"
         memoryQueueCount // This is automatically added after all items
@@ -158,9 +164,9 @@ namespace eMMC {
         /**
          * Size parameters for the SDINBDG4-8G
          */
-        static constexpr uint32_t blockSize = 512; // in bytes
-        static constexpr uint32_t blockCount = 0xE90E80; // TODO confirm this number
-        static constexpr uint64_t memorySizeInBytes = static_cast<uint64_t>(blockSize) * static_cast<uint64_t>(blockCount);
+        static constexpr uint32_t BlockSize = 512; // in bytes
+        static constexpr uint32_t BlockCount = 0xE90E80; // TODO confirm this number
+        static constexpr uint64_t MemorySizeInBytes = static_cast<uint64_t>(BlockSize) * static_cast<uint64_t>(BlockCount);
         float emmcUsage = 0; // percentage of EMMC memory utilized, calculated upon object construction
 
         /**
@@ -195,6 +201,11 @@ namespace eMMC {
          * Hold state for memory regions that store a queue of items
          * @note The queue "slots" of the items are always block aligned to make accessing/writing simpler and faster.
          *       For example, if the items have a size of 1.5*blockSize, then the slotSize is 2*blockSize
+         *
+         * @note The extra "metadata block" for storing  the head and tail pointers has the following format:
+         *
+         *            | headSlotPointer | tailSlotPointer | currentNumberOfItems |   empty   |
+         *  Bytes:           0-31              32 - 63           64 - 95            96 - 512
          */
         struct MemoryQueueHandler {
             SemaphoreHandle_t semaphoreHandle; // for concurrent access protection to this item
@@ -206,15 +217,18 @@ namespace eMMC {
             uint32_t currentNumberOfItems;
 
             uint32_t startBlockAddress;
-            uint32_t endBlockAddress;
+            uint32_t endBlockAddress; // in the scenario where a metadata block is present, this points to the last block that contains data
+                                      // the metadata block is allocated in endBlockAddress + 1
             uint32_t slotBlockSize;
             uint32_t headSlotPointer;  // Note: for the slot pointers, the value 0 indicates the slot that starts in block address
             uint32_t tailSlotPointer;
 
+            bool isRebootPersistent;
+
             MemoryQueueHandler() = default;
-            MemoryQueueHandler(const uint32_t itemSize, const uint32_t numberOfItems)
+            MemoryQueueHandler(const uint32_t itemSize, const uint32_t numberOfItems, const bool isRebootPersistent)
             : itemSize(itemSize), itemHasPartialBlock(false), maxNumberOfItems(numberOfItems), currentNumberOfItems(0),
-              headSlotPointer(0), tailSlotPointer(0) {}
+              headSlotPointer(0), tailSlotPointer(0), isRebootPersistent(isRebootPersistent) {}
         };
 
         etl::array<MemoryQueueHandler, memoryQueueCount> memoryQueueMap;
