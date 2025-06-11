@@ -302,7 +302,7 @@ namespace eMMC {
                 static_cast<uint8_t>(queueHandler.currentNumberOfItems),
             };
             status = writeBlockEMMC(metadataBuff,queueHandler.endBlockAddress + 1, 1);
-            if (status.has_value()) {
+            if (!status.has_value()) {
                 queueHandler.headSlotPointer = initHeadSlotPointer;
                 queueHandler.tailSlotPointer = initTailSlotPointer;
                 queueHandler.currentNumberOfItems = initCurrentNumberOfItems;
@@ -400,7 +400,7 @@ namespace eMMC {
                 static_cast<uint8_t>(queueHandler.currentNumberOfItems),
             };
             status = writeBlockEMMC(metadataBuff,queueHandler.endBlockAddress + 1, 1);
-            if (status.has_value()) {
+            if (!status.has_value()) {
                 queueHandler.headSlotPointer = initHeadSlotPointer;
                 queueHandler.tailSlotPointer = initTailSlotPointer;
                 queueHandler.currentNumberOfItems = initCurrentNumberOfItems;
@@ -431,7 +431,11 @@ namespace eMMC {
         // update metadata block
         if (queueHandler.isRebootPersistent) {
             const uint8_t metadataBuff[512] = {0};
-            writeBlockEMMC(metadataBuff,queueHandler.endBlockAddress + 1, 1);
+            status = writeBlockEMMC(metadataBuff,queueHandler.endBlockAddress + 1, 1);
+            if (!status.has_value()) {
+                xSemaphoreGive(queueHandler.semaphoreHandle);
+                return status;
+            }
         }
         xSemaphoreGive(queueHandler.semaphoreHandle);
         return {};
