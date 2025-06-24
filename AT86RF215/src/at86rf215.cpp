@@ -1280,12 +1280,15 @@ namespace AT86RF215 {
 
             case Error::INVALID_CHIP_MODE:
                 LOG_ERROR << "INVALID_CHIP_MODE";
+                break;
 
             case Error::RX_WAIT_TIMEOUT:
                 LOG_ERROR << "RX_WAIT_TIMEOUT";
+                break;
 
             case Error::EMBEDDED_CONTROL_DISABLED:
                 LOG_ERROR << "EMBEDDED_CONTROL_DISABLED";
+                break;
 
             default:
                 LOG_ERROR << "UNHANDLED_ERROR";
