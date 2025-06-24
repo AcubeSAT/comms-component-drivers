@@ -516,6 +516,13 @@ namespace AT86RF215 {
             regfbtxs = BBC1_FBTXS;
         }
 
+        set_state_private(transceiver, State::RF_TRXOFF, err);
+        if (err != Error::NO_ERRORS) {
+            xSemaphoreGive(spiAccessMutexHandle);
+            xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
+            return;
+        }
+
         // write length to register
         spi_write_8(regtxfll, length & 0xFF, err);
         if (err != Error::NO_ERRORS) {
@@ -585,7 +592,6 @@ namespace AT86RF215 {
             err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
             return;
         }
-        set_state_private(transceiver, State::RF_TRXOFF, err);
         xSemaphoreGive(spiAccessMutexHandle);
         xEventGroupSetBits(eventGroupHandle, transceiverUnoccupiedGroupBit);
     }
