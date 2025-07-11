@@ -97,7 +97,7 @@ namespace eMMC {
 
     etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, uint8_t* destBuffer, const uint32_t bufferSize, const uint32_t startBlock, const uint32_t numOfBlocks) {
         const MemoryItemHandler& itemHandler = memoryItemMap[item];
-        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -167,7 +167,7 @@ namespace eMMC {
 
     etl::expected<void, Error> eMMC_Utilities::storeItem(const MemoryItem item, uint8_t* sourceBuffer, const uint32_t bufferSize) {
         const MemoryItemHandler& itemHandler = memoryItemMap[item];
-        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -206,7 +206,7 @@ namespace eMMC {
 
     etl::expected<void, Error> eMMC_Utilities::resetItem(MemoryItem item) {
         const MemoryItemHandler& itemHandler = memoryItemMap[item];
-        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(itemHandler.semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -222,7 +222,7 @@ namespace eMMC {
 
     etl::pair<uint32_t, Error> eMMC_Utilities::popItemsFromQueue(const MemoryQueue queue, uint8_t* destBuffer, const uint32_t bufferSize, const uint32_t numItems) {
         MemoryQueueHandler& queueHandler = memoryQueueMap[queue];
-        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::make_pair(0, Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -316,7 +316,7 @@ namespace eMMC {
 
     etl::pair<uint32_t, Error> eMMC_Utilities::pushItemsToQueue(const MemoryQueue queue, uint8_t* sourceBuffer, const uint32_t bufferSize, const uint32_t numItems) {
         MemoryQueueHandler& queueHandler = memoryQueueMap[queue];
-        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::make_pair(0, Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -414,7 +414,7 @@ namespace eMMC {
 
     etl::expected<void, Error> eMMC_Utilities::resetQueue(MemoryQueue queue) {
         MemoryQueueHandler& queueHandler = memoryQueueMap[queue];
-        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(queueHandler.semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -442,7 +442,7 @@ namespace eMMC {
     }
 
     etl::expected<void, Error> eMMC_Utilities::readBlockEMMC(uint8_t* destBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
-        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -457,7 +457,7 @@ namespace eMMC {
         // wait until an interrupt occurs
         uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
             readCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit,
-            pdFALSE, pdFALSE, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks));
+            pdFALSE, pdFALSE, pdMS_TO_TICKS(TransactionTimeoutPerBlockMs * numberOfBlocks));
 
         if (!eventBits) {
             // timed out
@@ -466,10 +466,12 @@ namespace eMMC {
         }
 
         if (eventBits & readCompleteGroupBit) {
+            vTaskDelay(pdMS_TO_TICKS(SuccessfulTransactionDelayMs)); // wait a bit for the card to get out of the busy state
             HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
             xSemaphoreGive(eMMC_access_semaphoreHandle);
-            LOG_DEBUG << status;
-            if (status ==  HAL_MMC_CARD_ERROR) {
+
+            // once a transaction is complete, the card should return to state transfer
+            if (status != HAL_MMC_CARD_TRANSFER) {
                 return etl::unexpected(Error::EMMC_READ_FAILURE);
             }
             return {};
@@ -493,7 +495,7 @@ namespace eMMC {
     }
 
     etl::expected<void, Error> eMMC_Utilities::writeBlockEMMC(const uint8_t* sourceBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
-        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -508,7 +510,7 @@ namespace eMMC {
         // wait until an interrupt occurs
         uint32_t eventBits = xEventGroupWaitBits(eventGroupHandle,
             writeCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit,
-            pdFALSE, pdFALSE, pdMS_TO_TICKS(transactionTimeoutPerBlock * numberOfBlocks));
+            pdFALSE, pdFALSE, pdMS_TO_TICKS(TransactionTimeoutPerBlockMs * numberOfBlocks));
 
         if (!eventBits) {
             // timed out
@@ -517,10 +519,12 @@ namespace eMMC {
         }
 
         if (eventBits & writeCompleteGroupBit) {
+            vTaskDelay(pdMS_TO_TICKS(SuccessfulTransactionDelayMs)); // wait a bit for the card to get out of the busy state
             HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
             xSemaphoreGive(eMMC_access_semaphoreHandle);
 
-            if (status ==  HAL_MMC_CARD_ERROR) {
+            // once a transaction is complete, the card should return to state transfer
+            if (status !=  HAL_MMC_CARD_TRANSFER) {
               return etl::unexpected(Error::EMMC_WRITE_FAILURE);
             }
             return {};
@@ -544,7 +548,7 @@ namespace eMMC {
     }
 
     etl::expected<void, Error> eMMC_Utilities::eraseBlocksEMMC(const uint32_t block_address_start, const  uint32_t block_address_end) {
-        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(semaphoreTimeout)) != pdTRUE) {
+        if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
@@ -564,7 +568,65 @@ namespace eMMC {
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
 
+        // wait until the erase procedure is complete
+        do {
+            status = HAL_MMC_GetCardState(hmmc);
+        } while (status != HAL_MMC_CARD_STANDBY && status != HAL_MMC_CARD_TRANSFER);
+
         xSemaphoreGive(eMMC_access_semaphoreHandle);
         return {}; // success
+    }
+
+    void eMMC_Utilities::printError(Error error) {
+        switch (error) {
+        case Error::EMMC_NO_ERROR:
+            LOG_DEBUG << "EMMC_NO_ERROR";
+            break;
+        case Error::EMMC_READ_FAILURE:
+            LOG_DEBUG << "EMMC_READ_FAILURE";
+            break;
+        case Error::EMMC_WRITE_FAILURE:
+            LOG_DEBUG << "EMMC_WRITE_FAILURE";
+            break;
+        case Error::EMMC_ERASE_BLOCK_FAILURE:
+            LOG_DEBUG << "EMMC_ERASE_BLOCK_FAILURE";
+            break;
+        case Error::EMMC_INVALID_MEMORY_BLOCK_REGION:
+            LOG_DEBUG << "EMMC_INVALID_MEMORY_BLOCK_REGION";
+            break;
+        case Error::EMMC_TRANSACTION_TIMED_OUT:
+            LOG_DEBUG << "EMMC_TRANSACTION_TIMED_OUT";
+            break;
+        case Error::EMMC_TRANSACTION_ABORTED:
+            LOG_DEBUG << "EMMC_TRANSACTION_ABORTED";
+            break;
+        case Error::EMMC_MUTEX_LOCK_TIMEOUT:
+            LOG_DEBUG << "EMMC_MUTEX_LOCK_TIMEOUT";
+            break;
+        case Error::EMMC_BUFFER_TOO_SMALL:
+            LOG_DEBUG << "EMMC_BUFFER_TOO_SMALL";
+            break;
+        case Error::EMMC_QUEUE_FULL:
+            LOG_DEBUG << "EMMC_QUEUE_FULL";
+            break;
+        case Error::EMMC_QUEUE_EMPTY:
+            LOG_DEBUG << "EMMC_QUEUE_EMPTY";
+            break;
+        case Error::EMMC_INVALID_NUMBER_OF_ITEMS:
+            LOG_DEBUG << "EMMC_INVALID_NUMBER_OF_ITEMS";
+            break;
+        case Error::EMMC_FREERTOS_RESOURCE_INITIALIZATION_FAILED:
+            LOG_DEBUG << "EMMC_FREERTOS_RESOURCE_INITIALIZATION_FAILED";
+            break;
+        case Error::EMMC_SPECIFIED_ZERO_LENGTH_OBJECT:
+            LOG_DEBUG << "EMMC_SPECIFIED_ZERO_LENGTH_OBJECT";
+            break;
+        case Error::EMMC_SURPASSED_MEMORY_CONSTRAINTS:
+            LOG_DEBUG << "EMMC_SURPASSED_MEMORY_CONSTRAINTS";
+            break;
+        default:
+            LOG_DEBUG << "UNKNOWN_ERROR";
+            break;
+        }
     }
 } // namespace eMMC

@@ -160,6 +160,8 @@ namespace eMMC {
          * @brief Utility function. Read from eMMC blocks.
          */
         etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+
+        void printError(Error error);
     private:
         /**
          * Size parameters for the SDINBDG4-8G
@@ -176,8 +178,11 @@ namespace eMMC {
         SemaphoreHandle_t eMMC_access_semaphoreHandle; // for concurrent access protection to the EMMC peripheral itself
         StaticSemaphore_t eMMC_access_semaphoreBuffer;
         StaticSemaphore_t isrTriggeredSemaphoreBuffer;
-        uint32_t transactionTimeoutPerBlock = 100; // ms
-        uint32_t semaphoreTimeout = 1000;       // ms
+        static constexpr uint32_t TransactionTimeoutPerBlockMs = 100;
+        static constexpr uint32_t SemaphoreTimeoutMs = 1000;
+        static constexpr uint32_t SuccessfulTransactionDelayMs = 4; // The card stays in the busy state for a few ms
+                                                                    // after a transaction is complete. A delay of at
+                                                                    // least 4 ms is required for reliable operation
 
         /**
          * Hold state for memory regions that store a single item
