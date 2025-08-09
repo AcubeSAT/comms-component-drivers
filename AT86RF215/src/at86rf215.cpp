@@ -1461,11 +1461,11 @@ namespace AT86RF215 {
     void At86rf215_Utilities::spi_write_8(uint16_t address, uint8_t value, Error& err) {
         uint8_t msg[3] = {static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF), value};
 
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
+        HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET); // slave select pin
         uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, msg, 3);
 
         if (hal_error != HAL_OK) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
@@ -1475,23 +1475,23 @@ namespace AT86RF215 {
                             pdTRUE, pdTRUE,
                             pdMS_TO_TICKS(3*spiByteWriteCompleteDelayMs));
         if (!(eventBits & spiWriteCompleteGroupBit)) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
 
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
         err = Error::NO_ERRORS;
     }
 
     uint8_t At86rf215_Utilities::spi_read_8(uint16_t address, Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>((address >> 8) & 0x7F), static_cast<uint8_t>(address & 0xFF)};
         uint8_t response[3];
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
+        HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET); // slave select pin
         uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, 3);
 
         if (hal_error != HAL_OK) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return 0;
         }
@@ -1501,12 +1501,12 @@ namespace AT86RF215 {
                             pdTRUE, pdTRUE,
                             pdMS_TO_TICKS(2*spiByteWriteCompleteDelayMs + 3*spiByteReadCompleteDelayMs));
         if (!(eventBits & spiReadCompleteGroupBit)) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return 0;
         }
 
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
         err = Error::NO_ERRORS;
 
         return response[2];
@@ -1515,11 +1515,11 @@ namespace AT86RF215 {
     void At86rf215_Utilities::spi_block_write_8(uint16_t address, uint16_t n, uint8_t* value,
                                       Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF)};
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
+        HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET); // slave select pin
 
         uint8_t hal_error = HAL_SPI_Transmit_DMA(hspi, msg, 2);
         if (hal_error != HAL_OK) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
@@ -1529,14 +1529,14 @@ namespace AT86RF215 {
                             pdTRUE, pdTRUE,
                             pdMS_TO_TICKS(2*spiByteWriteCompleteDelayMs));
         if (!(eventBits & spiWriteCompleteGroupBit)) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
 
         hal_error = HAL_SPI_Transmit_DMA(hspi, value, n);
         if (hal_error != HAL_OK) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
@@ -1546,12 +1546,12 @@ namespace AT86RF215 {
                             pdTRUE, pdTRUE,
                             pdMS_TO_TICKS(n*static_cast<uint64_t>(spiByteWriteCompleteDelayMs)));
         if (!(eventBits & spiWriteCompleteGroupBit)) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return;
         }
 
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
         err = Error::NO_ERRORS;
     }
 
@@ -1559,10 +1559,10 @@ namespace AT86RF215 {
                                          uint8_t* response, Error& err) {
         uint8_t msg[2] = {static_cast<uint8_t>((address >> 8) & 0x7F), static_cast<uint8_t>(address & 0xFF)};
 
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET); // slave select pin
+        HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET); // slave select pin
         uint8_t hal_error = HAL_SPI_TransmitReceive_DMA(hspi, msg, response, n + 2);
         if (hal_error != HAL_OK) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return nullptr;
         }
@@ -1572,12 +1572,12 @@ namespace AT86RF215 {
                             pdTRUE, pdTRUE,
                             pdMS_TO_TICKS(2*spiByteWriteCompleteDelayMs + n*static_cast<uint64_t>(spiByteReadCompleteDelayMs)));
         if (!(eventBits & spiReadCompleteGroupBit)) {
-            HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             err = Error::FAILED_READING_FROM_REGISTER;
             return nullptr;
         }
 
-        HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
         err = Error::NO_ERRORS;
         return response + 2;
     }
