@@ -18,6 +18,13 @@ namespace eMMC {
             return etl::unexpected(Error::EMMC_FREERTOS_RESOURCE_INITIALIZATION_FAILED);
         }
 
+        // Fetch logical block size and count
+        HAL_MMC_CardInfoTypeDef pCardInfo;
+        HAL_MMC_GetCardInfo(hmmc, &pCardInfo);
+        logicalBlockSize = pCardInfo.LogBlockSize;
+        logicalBlockCount = pCardInfo.LogBlockNbr;
+        memorySizeInBytes = static_cast<uint64_t>(logicalBlockSize) * static_cast<uint64_t>(logicalBlockCount);
+
         // Initialize the memoryMap array using the sizes from MemoryItems.def
 #define MEMORY_ITEM(name, size) memoryItemMap[name] = MemoryItemHandler(size);
 #include "MemoryItems.def"
@@ -31,10 +38,10 @@ namespace eMMC {
             }
 
             memoryItemMap[i].startBlockAddress = headBlockPointer;
-            memoryItemMap[i].hasPartialBlock = static_cast<bool>(memoryItemMap[i].size % BlockSize);
-            headBlockPointer += memoryItemMap[i].size / BlockSize + static_cast<uint64_t>(memoryItemMap[i].hasPartialBlock); // points one block past the allocated space
+            memoryItemMap[i].hasPartialBlock = static_cast<bool>(memoryItemMap[i].size % logicalBlockSize);
+            headBlockPointer += memoryItemMap[i].size / logicalBlockSize + static_cast<uint64_t>(memoryItemMap[i].hasPartialBlock); // points one block past the allocated space
 
-            if (headBlockPointer > static_cast<uint64_t>(BlockCount)) {
+            if (headBlockPointer > static_cast<uint64_t>(logicalBlockCount)) {
                 return etl::unexpected(Error::EMMC_SURPASSED_MEMORY_CONSTRAINTS);
             }
             memoryItemMap[i].endBlockAddress = headBlockPointer - 1;
@@ -52,46 +59,64 @@ namespace eMMC {
                 return etl::unexpected(Error::EMMC_SPECIFIED_ZERO_LENGTH_OBJECT);
             }
 
-            memoryQueueMap[i].itemHasPartialBlock = memoryQueueMap[i].itemSize % BlockSize;
-            memoryQueueMap[i].slotBlockSize = memoryQueueMap[i].itemSize / BlockSize + memoryQueueMap[i].itemHasPartialBlock;
+            memoryQueueMap[i].itemHasPartialBlock = memoryQueueMap[i].itemSize % logicalBlockSize;
+            memoryQueueMap[i].slotBlockSize = memoryQueueMap[i].itemSize / logicalBlockSize + memoryQueueMap[i].itemHasPartialBlock;
             memoryQueueMap[i].startBlockAddress = headBlockPointer;
             headBlockPointer += memoryQueueMap[i].slotBlockSize * memoryQueueMap[i].maxNumberOfItems
                                 + memoryQueueMap[i].isRebootPersistent; // points one block past the allocated space
 
-            if (headBlockPointer > static_cast<uint64_t>(BlockCount)) {
+            if (headBlockPointer > static_cast<uint64_t>(logicalBlockCount)) {
                 return etl::unexpected(Error::EMMC_SURPASSED_MEMORY_CONSTRAINTS);
             }
             memoryQueueMap[i].endBlockAddress = headBlockPointer - 1 - memoryQueueMap[i].isRebootPersistent;
             memoryQueueMap[i].semaphoreHandle = xSemaphoreCreateMutexStatic(&memoryQueueMap[i].semaphoreBuffer);
 
             if (memoryQueueMap[i].isRebootPersistent) {
-                // extract head and tail pointers
-                uint8_t metadataBuff[BlockSize];
+                // Extract head, tail pointers.
+                // Use the metadata block values only if they satisfy basic sanity checks. Otherwise, reset the queue.
+                uint8_t metadataBuff[logicalBlockSize];
                 if (readBlockEMMC(metadataBuff, memoryQueueMap[i].endBlockAddress + 1, 1).has_value()) {
-                    memoryQueueMap[i].headSlotPointer =
+                    const uint32_t head =
                         static_cast<uint32_t>(metadataBuff[0]) << 24 |
                         static_cast<uint32_t>(metadataBuff[1]) << 16 |
                         static_cast<uint32_t>(metadataBuff[2]) << 8 |
                         static_cast<uint32_t>(metadataBuff[3]);
 
-                    memoryQueueMap[i].tailSlotPointer =
+                    const uint32_t tail =
                         static_cast<uint32_t>(metadataBuff[4]) << 24 |
                         static_cast<uint32_t>(metadataBuff[5]) << 16 |
                         static_cast<uint32_t>(metadataBuff[6]) << 8 |
                         static_cast<uint32_t>(metadataBuff[7]);
 
-                    memoryQueueMap[i].currentNumberOfItems =
+                    const uint32_t numberOfItems =
                         static_cast<uint32_t>(metadataBuff[8]) << 24 |
                         static_cast<uint32_t>(metadataBuff[9]) << 16 |
                         static_cast<uint32_t>(metadataBuff[10]) << 8 |
                         static_cast<uint32_t>(metadataBuff[11]);
-                } else {
-                    // TODO Notify about the error so an event report may be generated
+
+                    // The distance should be equal to numberOfItems, except in the edge case where the queue is full,
+                    // where head == tail (distance == 0) and numberOfItems == maximum number of items
+                    const uint32_t distance = ((tail >= head) ? (tail - head) : (tail + memoryQueueMap[i].maxNumberOfItems - head));
+                    const uint32_t maxNumberOfItems = memoryQueueMap[i].maxNumberOfItems;
+                    if (head < maxNumberOfItems &&
+                        tail < maxNumberOfItems &&
+                        numberOfItems <= maxNumberOfItems &&
+                         ((distance == numberOfItems) || (distance == 0 && numberOfItems == maxNumberOfItems))) {
+                        memoryQueueMap[i].headSlotPointer = head;
+                        memoryQueueMap[i].tailSlotPointer = tail;
+                        memoryQueueMap[i].currentNumberOfItems = numberOfItems;
+                    } else {
+                        LOG_DEBUG << "Metadata block check in persistent queue with ID " << i << " failed. Resetting queue...";
+                        const etl::expected<void, Error> status = resetQueue(static_cast<MemoryQueue>(i));
+                        if (!status.has_value()) {
+                            return etl::unexpected(status.error());
+                        }
+                    }
                 }
             }
         }
 
-        emmcUsage = 100 * static_cast<float>(headBlockPointer-1) / BlockCount;
+        emmcUsage = 100 * static_cast<float>(headBlockPointer-1) / logicalBlockCount;
         return emmcUsage;
     }
 
@@ -113,13 +138,13 @@ namespace eMMC {
         if (!itemHandler.hasPartialBlock || // item is block aligned (not leftover bits in the end)
             !requestEndsOnLastItemBlock) {     // OR the last block is not requested
             // Standard check
-            if (bufferSize < numOfBlocks * BlockSize) {
+            if (bufferSize < numOfBlocks * logicalBlockSize) {
                 xSemaphoreGive(itemHandler.semaphoreHandle);
                 return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
             }
         } else { // the last requested block is the last item block AND there are leftover bits in the end
-            // The buffer can be smaller than numOfBlocks * BlockSize
-            if (bufferSize < (numOfBlocks - 1) * BlockSize + itemHandler.size % BlockSize) {
+            // The buffer can be smaller than numOfBlocks * logicalBlockSize
+            if (bufferSize < (numOfBlocks - 1) * logicalBlockSize + itemHandler.size % logicalBlockSize) {
                 xSemaphoreGive(itemHandler.semaphoreHandle);
                 return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
             }
@@ -145,7 +170,7 @@ namespace eMMC {
             }
 
             // partial read
-            uint8_t lastBlock[BlockSize];
+            uint8_t lastBlock[logicalBlockSize];
             status = readBlockEMMC(lastBlock, lastRequestedBlock, 1);
             if (!status.has_value()) {
                 xSemaphoreGive(itemHandler.semaphoreHandle);
@@ -153,7 +178,7 @@ namespace eMMC {
             }
 
             // copy tail bytes from last block
-            std::memcpy(destBuffer + (numOfBlocks - 1) * BlockSize, lastBlock, itemHandler.size % BlockSize);
+            std::memcpy(destBuffer + (numOfBlocks - 1) * logicalBlockSize, lastBlock, itemHandler.size % logicalBlockSize);
 
             xSemaphoreGive(itemHandler.semaphoreHandle);
             return {}; // success
@@ -178,7 +203,7 @@ namespace eMMC {
 
         // full read (continuous pages)
         etl::expected<void, Error> status;
-        const uint32_t continuousPages = itemHandler.size / BlockSize;
+        const uint32_t continuousPages = itemHandler.size / logicalBlockSize;
         if (continuousPages != 0) {
             status = writeBlockEMMC(sourceBuffer, itemHandler.startBlockAddress, continuousPages);
             if (!status.has_value()) {
@@ -190,8 +215,8 @@ namespace eMMC {
         // if the item is not a multiple of block size, the last block needs to be copied
         // separately (due to sourceBuffer not being large enough)
         if (itemHandler.hasPartialBlock) {
-            uint8_t lastBlock[BlockSize] = {0};
-            std::memcpy(lastBlock, sourceBuffer + continuousPages * BlockSize, itemHandler.size % BlockSize);
+            uint8_t lastBlock[logicalBlockSize] = {0};
+            std::memcpy(lastBlock, sourceBuffer + continuousPages * logicalBlockSize, itemHandler.size % logicalBlockSize);
 
             status = writeBlockEMMC(lastBlock, itemHandler.endBlockAddress, 1);
             if (!status.has_value()) {
@@ -247,7 +272,7 @@ namespace eMMC {
         const uint32_t initCurrentNumberOfItems = queueHandler.currentNumberOfItems;
 
         etl::expected<void, Error> status = {};
-        uint8_t lastBlock[BlockSize] = {0}; // in case the items are not a multiple of the block size
+        uint8_t lastBlock[logicalBlockSize] = {0}; // in case the items are not a multiple of the block size
         for (uint32_t i = 0; i < itemsToPop; i++) {
             if (queueHandler.itemHasPartialBlock) {
                 // full read for the continuous blocks
@@ -269,7 +294,7 @@ namespace eMMC {
                     xSemaphoreGive(queueHandler.semaphoreHandle);
                     return etl::make_pair(i, status.error());
                 }
-                std::memcpy(destBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * BlockSize, lastBlock, queueHandler.itemSize % BlockSize);
+                std::memcpy(destBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * logicalBlockSize, lastBlock, queueHandler.itemSize % logicalBlockSize);
             } else {
                 status = readBlockEMMC(destBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
                     queueHandler.headSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize);
@@ -287,7 +312,7 @@ namespace eMMC {
 
         // update metadata block
         if (queueHandler.isRebootPersistent) {
-            const uint8_t metadataBuff[512] = {
+            const uint8_t metadataBuff[logicalBlockSize] = {
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 24),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 16),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 8),
@@ -356,10 +381,10 @@ namespace eMMC {
                 }
 
                 // partial write for the last block (so there may be no reading beyond the sourceBuffer's edge)
-                uint8_t lastBlock[BlockSize] = {0};
+                uint8_t lastBlock[logicalBlockSize] = {0};
                 std::memcpy(lastBlock,
-                    sourceBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * BlockSize,
-                    queueHandler.itemSize % BlockSize);
+                    sourceBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * logicalBlockSize,
+                    queueHandler.itemSize % logicalBlockSize);
                 status = writeBlockEMMC(lastBlock,
                     queueHandler.startBlockAddress + queueHandler.tailSlotPointer * queueHandler.slotBlockSize + (queueHandler.slotBlockSize - 1),
                     1);
@@ -385,7 +410,7 @@ namespace eMMC {
 
         // update metadata block
         if (queueHandler.isRebootPersistent) {
-            const uint8_t metadataBuff[512] = {
+            const uint8_t metadataBuff[logicalBlockSize] = {
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 24),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 16),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 8),
@@ -430,7 +455,7 @@ namespace eMMC {
 
         // update metadata block
         if (queueHandler.isRebootPersistent) {
-            const uint8_t metadataBuff[512] = {0};
+            const uint8_t metadataBuff[logicalBlockSize] = {0};
             status = writeBlockEMMC(metadataBuff,queueHandler.endBlockAddress + 1, 1);
             if (!status.has_value()) {
                 xSemaphoreGive(queueHandler.semaphoreHandle);
@@ -466,12 +491,22 @@ namespace eMMC {
         }
 
         if (eventBits & readCompleteGroupBit) {
-            vTaskDelay(pdMS_TO_TICKS(SuccessfulTransactionDelayMs)); // wait a bit for the card to get out of the busy state
-            HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
+            // once a transaction is complete, the card should return to state transfer
+
+            // poll the card state
+            uint32_t pollingTimeMs = 0;
+            bool success = false;
+            while (pollingTimeMs < MaxSuccessfulTransactionDelayMs) {
+                vTaskDelay(pdMS_TO_TICKS(SuccessfulTransactionPollingPeriodMs));
+                pollingTimeMs += SuccessfulTransactionPollingPeriodMs;
+                if (HAL_MMC_GetCardState(hmmc) == HAL_MMC_CARD_TRANSFER) {
+                    success = true;
+                    break;
+                }
+            }
             xSemaphoreGive(eMMC_access_semaphoreHandle);
 
-            // once a transaction is complete, the card should return to state transfer
-            if (status != HAL_MMC_CARD_TRANSFER) {
+            if (!success) {
                 return etl::unexpected(Error::EMMC_READ_FAILURE);
             }
             return {};
@@ -479,7 +514,6 @@ namespace eMMC {
 
         if (eventBits & errorOccuredGroupBit) {
             // error callback was called
-            /// TODO: handle the error, check hmmc handle for error messages.
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_READ_FAILURE);
         }
@@ -519,12 +553,22 @@ namespace eMMC {
         }
 
         if (eventBits & writeCompleteGroupBit) {
-            vTaskDelay(pdMS_TO_TICKS(SuccessfulTransactionDelayMs)); // wait a bit for the card to get out of the busy state
-            HAL_MMC_CardStateTypeDef status = HAL_MMC_GetCardState(hmmc);
+            // once a transaction is complete, the card should return to state transfer
+
+            // poll the card state
+            uint32_t pollingTimeMs = 0;
+            bool success = false;
+            while (pollingTimeMs < MaxSuccessfulTransactionDelayMs) {
+                vTaskDelay(pdMS_TO_TICKS(SuccessfulTransactionPollingPeriodMs));
+                pollingTimeMs += SuccessfulTransactionPollingPeriodMs;
+                if (HAL_MMC_GetCardState(hmmc) == HAL_MMC_CARD_TRANSFER) {
+                    success = true;
+                    break;
+                }
+            }
             xSemaphoreGive(eMMC_access_semaphoreHandle);
 
-            // once a transaction is complete, the card should return to state transfer
-            if (status !=  HAL_MMC_CARD_TRANSFER) {
+            if (!success) {
               return etl::unexpected(Error::EMMC_WRITE_FAILURE);
             }
             return {};
@@ -532,7 +576,6 @@ namespace eMMC {
 
         if (eventBits & errorOccuredGroupBit) {
             // error callback was called
-            /// TODO: handle the error, check hmmc handle for error messages.
             xSemaphoreGive(eMMC_access_semaphoreHandle);
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
@@ -570,6 +613,7 @@ namespace eMMC {
 
         // wait until the erase procedure is complete
         do {
+            vTaskDelay(pdMS_TO_TICKS(ErasePollingPeriodMs));
             status = HAL_MMC_GetCardState(hmmc);
         } while (status != HAL_MMC_CARD_STANDBY && status != HAL_MMC_CARD_TRANSFER);
 

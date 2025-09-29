@@ -74,14 +74,14 @@ namespace eMMC {
          *
          * @returns The percentage of allocated memory
          */
-        etl::expected<float, Error> initializeResources(MMC_HandleTypeDef* handle);
+        [[nodiscard]] etl::expected<float, Error> initializeResources(MMC_HandleTypeDef* handle);
 
         /** Memory item interface**/
 
         /**
          * @brief Get the item size in bytes
          */
-        uint32_t getItemSize(const MemoryItem item) {
+        [[nodiscard]] uint32_t getItemSize(const MemoryItem item) {
             return memoryItemMap[item].size;
         }
 
@@ -89,7 +89,7 @@ namespace eMMC {
          * @brief Get the entire item
          * @note If the item size is not a multiple of the block size, the function ensures that leftover bytes are not copied
          */
-        etl::expected<void, Error> getItem(MemoryItem item, uint8_t* destBuffer, uint32_t bufferSize);
+        [[nodiscard]] etl::expected<void, Error> getItem(MemoryItem item, uint8_t* destBuffer, uint32_t bufferSize);
 
         /**
          * @brief Read a partial item
@@ -99,36 +99,36 @@ namespace eMMC {
          * @note If the item size is not a multiple of the block size, the function ensures that leftover bytes are not copied,
          *       in the scenario that the last block is requested.
          */
-        etl::expected<void, Error> getItem(MemoryItem item, uint8_t* destBuffer, uint32_t bufferSize, uint32_t startBlock, uint32_t numOfBlocks);
+        [[nodiscard]] etl::expected<void, Error> getItem(MemoryItem item, uint8_t* destBuffer, uint32_t bufferSize, uint32_t startBlock, uint32_t numOfBlocks);
 
-        etl::expected<void, Error> storeItem(MemoryItem item, uint8_t* sourceBuffer, uint32_t bufferSize);
+        [[nodiscard]] etl::expected<void, Error> storeItem(MemoryItem item, uint8_t* sourceBuffer, uint32_t bufferSize);
 
         // TODO this function would make sense if the item is very large and has to be partially copied, but we dont need this right now
-        etl::expected<void, Error> storeItem(MemoryItem item, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t startBlock, uint32_t numOfBlocks);
+        [[nodiscard]] etl::expected<void, Error> storeItem(MemoryItem item, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t startBlock, uint32_t numOfBlocks);
 
         /**
          * Debugging function. Erases the data of that specific item.
          */
-        etl::expected<void, Error> resetItem(MemoryItem item);
+        [[nodiscard]] etl::expected<void, Error> resetItem(MemoryItem item);
 
         /** Queue interface **/
-        bool isQueueEmpty(const MemoryQueue queue) {
+        [[nodiscard]] bool isQueueEmpty(const MemoryQueue queue) {
             return memoryQueueMap[queue].currentNumberOfItems == 0;
         }
 
-        bool isQueueFull(const MemoryQueue queue) {
+        [[nodiscard]] bool isQueueFull(const MemoryQueue queue) {
             return memoryQueueMap[queue].currentNumberOfItems == memoryQueueMap[queue].maxNumberOfItems;
         }
 
-        uint32_t queueMaxSize(const MemoryQueue queue) {
+        [[nodiscard]] uint32_t queueMaxSize(const MemoryQueue queue) {
             return memoryQueueMap[queue].maxNumberOfItems;
         }
 
-        uint32_t queueCurrentSize(const MemoryQueue queue) {
+        [[nodiscard]] uint32_t queueCurrentSize(const MemoryQueue queue) {
             return memoryQueueMap[queue].currentNumberOfItems;
         }
 
-        uint32_t getQueueElementSize(const MemoryQueue queue) {
+        [[nodiscard]] uint32_t getQueueElementSize(const MemoryQueue queue) {
             return memoryQueueMap[queue].itemSize;
         }
 
@@ -138,37 +138,37 @@ namespace eMMC {
          *       bits in the queue slot are not returned
          * @returns Returns the actual amount of items popped and whether the operation as a whole was successful or not.
          */
-        etl::pair<uint32_t, Error> popItemsFromQueue(MemoryQueue queue, uint8_t* destBuffer, uint32_t bufferSize, uint32_t numItems);
+        [[nodiscard]] etl::pair<uint32_t, Error> popItemsFromQueue(MemoryQueue queue, uint8_t* destBuffer, uint32_t bufferSize, uint32_t numItems);
 
         /**
          * @brief Push one or more items to the queue
          * @returns Returns the actual amount of items pushed and whether the operation as a whole was successful or not.
          */
-        etl::pair<uint32_t, Error> pushItemsToQueue(MemoryQueue queue, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t numItems);
+        [[nodiscard]] etl::pair<uint32_t, Error> pushItemsToQueue(MemoryQueue queue, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t numItems);
 
         /**
          * Debugging function. Erases the data of that specific queue.
          */
-        etl::expected<void, Error> resetQueue(MemoryQueue queue);
+        [[nodiscard]] etl::expected<void, Error> resetQueue(MemoryQueue queue);
 
         /**
          * @brief Utility function. Write to eMMC blocks.
          */
-        etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+        [[nodiscard]] etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
 
         /**
          * @brief Utility function. Read from eMMC blocks.
          */
-        etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+        [[nodiscard]] etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
 
         void printError(Error error);
     private:
         /**
          * Size parameters for the SDINBDG4-8G
          */
-        static constexpr uint32_t BlockSize = 512; // in bytes
-        static constexpr uint32_t BlockCount = 0xE90E80; // TODO confirm this number
-        static constexpr uint64_t MemorySizeInBytes = static_cast<uint64_t>(BlockSize) * static_cast<uint64_t>(BlockCount);
+        uint32_t logicalBlockSize;; // in bytes
+        uint32_t logicalBlockCount;
+        uint64_t memorySizeInBytes;
         float emmcUsage = 0; // percentage of EMMC memory utilized, calculated upon object construction
 
         /**
@@ -180,9 +180,14 @@ namespace eMMC {
         StaticSemaphore_t isrTriggeredSemaphoreBuffer;
         static constexpr uint32_t TransactionTimeoutPerBlockMs = 100;
         static constexpr uint32_t SemaphoreTimeoutMs = 1000;
-        static constexpr uint32_t SuccessfulTransactionDelayMs = 4; // The card stays in the busy state for a few ms
-                                                                    // after a transaction is complete. A delay of at
-                                                                    // least 4 ms is required for reliable operation
+
+        // The card stays in the busy state for a few ms after a transaction is complete. Through testing, a delay
+        // of 4 ms always guarantees the card is not in the busy state anymore, so this value is used as the maximum
+        // polling time.
+        static constexpr uint32_t SuccessfulTransactionPollingPeriodMs = 1;
+        static constexpr uint32_t MaxSuccessfulTransactionDelayMs = 4;
+
+        static constexpr uint32_t ErasePollingPeriodMs = 5;
 
         /**
          * Hold state for memory regions that store a single item
