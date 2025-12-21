@@ -6,6 +6,30 @@ namespace eMMC {
     // definition
     eMMC_Utilities eMMC_Utils = eMMC_Utilities();
 
+    void eMMC_Utilities::txIrqHandler() {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xEventGroupSetBitsFromISR(eMMC_Utils.eventGroupHandle, writeCompleteGroupBit, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+
+    void eMMC_Utilities::rxIrqHandler() {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xEventGroupSetBitsFromISR(eMMC_Utils.eventGroupHandle, readCompleteGroupBit, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+
+    void eMMC_Utilities::errorIrqHandler() {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xEventGroupSetBitsFromISR(eMMC_Utils.eventGroupHandle, errorOccuredGroupBit, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+
+    void eMMC_Utilities::abortIrqHandler() {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xEventGroupSetBitsFromISR(eMMC_Utils.eventGroupHandle, transactionAbortedGroupBit, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+
     etl::expected<float, Error> eMMC_Utilities::initializeResources(MMC_HandleTypeDef* handle) {
         hmmc = handle;
 
@@ -72,27 +96,38 @@ namespace eMMC {
             memoryQueueMap[i].semaphoreHandle = xSemaphoreCreateMutexStatic(&memoryQueueMap[i].semaphoreBuffer);
 
             if (memoryQueueMap[i].isRebootPersistent) {
-                // Extract head, tail pointers.
-                // Use the metadata block values only if they satisfy basic sanity checks. Otherwise, reset the queue.
-                uint8_t metadataBuff[logicalBlockSize];
+                // Extract metadata block
+                alignas(32) uint8_t metadataBuff[logicalBlockSize];
                 if (readBlockEMMC(metadataBuff, memoryQueueMap[i].endBlockAddress + 1, 1).has_value()) {
-                    const uint32_t head =
+                    const uint32_t magicVal =
                         static_cast<uint32_t>(metadataBuff[0]) << 24 |
                         static_cast<uint32_t>(metadataBuff[1]) << 16 |
                         static_cast<uint32_t>(metadataBuff[2]) << 8 |
                         static_cast<uint32_t>(metadataBuff[3]);
 
-                    const uint32_t tail =
+                    const uint32_t head =
                         static_cast<uint32_t>(metadataBuff[4]) << 24 |
                         static_cast<uint32_t>(metadataBuff[5]) << 16 |
                         static_cast<uint32_t>(metadataBuff[6]) << 8 |
                         static_cast<uint32_t>(metadataBuff[7]);
 
-                    const uint32_t numberOfItems =
+                    const uint32_t tail =
                         static_cast<uint32_t>(metadataBuff[8]) << 24 |
                         static_cast<uint32_t>(metadataBuff[9]) << 16 |
                         static_cast<uint32_t>(metadataBuff[10]) << 8 |
                         static_cast<uint32_t>(metadataBuff[11]);
+
+                    const uint32_t numberOfItems =
+                        static_cast<uint32_t>(metadataBuff[12]) << 24 |
+                        static_cast<uint32_t>(metadataBuff[13]) << 16 |
+                        static_cast<uint32_t>(metadataBuff[14]) << 8 |
+                        static_cast<uint32_t>(metadataBuff[15]);
+
+                    if (magicVal != MagicValue) {
+                        LOG_DEBUG << "[eMMC Driver] Metadata block check in persistent queue with ID " << i << " does not contain magic value. Resetting queue...";
+                        resetQueue(static_cast<MemoryQueue>(i));
+                        continue;
+                    }
 
                     // The distance should be equal to numberOfItems, except in the edge case where the queue is full,
                     // where head == tail (distance == 0) and numberOfItems == maximum number of items
@@ -106,12 +141,14 @@ namespace eMMC {
                         memoryQueueMap[i].tailSlotPointer = tail;
                         memoryQueueMap[i].currentNumberOfItems = numberOfItems;
                     } else {
-                        LOG_DEBUG << "Metadata block check in persistent queue with ID " << i << " failed. Resetting queue...";
+                        LOG_DEBUG << "[eMMC Driver] Metadata block check in persistent queue with ID " << i << " failed. Resetting queue...";
                         const etl::expected<void, Error> status = resetQueue(static_cast<MemoryQueue>(i));
                         if (!status.has_value()) {
                             return etl::unexpected(status.error());
                         }
                     }
+                } else {
+                    LOG_DEBUG << "[eMMC Driver] Metadata block read in persistent queue with ID " << i << " failed.";
                 }
             }
         }
@@ -170,7 +207,7 @@ namespace eMMC {
             }
 
             // partial read
-            uint8_t lastBlock[logicalBlockSize];
+            alignas(32) uint8_t lastBlock[logicalBlockSize];
             status = readBlockEMMC(lastBlock, lastRequestedBlock, 1);
             if (!status.has_value()) {
                 xSemaphoreGive(itemHandler.semaphoreHandle);
@@ -215,7 +252,7 @@ namespace eMMC {
         // if the item is not a multiple of block size, the last block needs to be copied
         // separately (due to sourceBuffer not being large enough)
         if (itemHandler.hasPartialBlock) {
-            uint8_t lastBlock[logicalBlockSize] = {0};
+            alignas(32) uint8_t lastBlock[logicalBlockSize] = {0};
             std::memcpy(lastBlock, sourceBuffer + continuousPages * logicalBlockSize, itemHandler.size % logicalBlockSize);
 
             status = writeBlockEMMC(lastBlock, itemHandler.endBlockAddress, 1);
@@ -272,7 +309,7 @@ namespace eMMC {
         const uint32_t initCurrentNumberOfItems = queueHandler.currentNumberOfItems;
 
         etl::expected<void, Error> status = {};
-        uint8_t lastBlock[logicalBlockSize] = {0}; // in case the items are not a multiple of the block size
+        alignas(32) uint8_t lastBlock[logicalBlockSize] = {0}; // in case the items are not a multiple of the block size
         for (uint32_t i = 0; i < itemsToPop; i++) {
             if (queueHandler.itemHasPartialBlock) {
                 // full read for the continuous blocks
@@ -312,7 +349,11 @@ namespace eMMC {
 
         // update metadata block
         if (queueHandler.isRebootPersistent) {
-            const uint8_t metadataBuff[logicalBlockSize] = {
+            alignas(32) uint8_t metadataBuff[logicalBlockSize] = {
+                static_cast<uint8_t>(MagicValue >> 24),
+                static_cast<uint8_t>(MagicValue >> 16),
+                static_cast<uint8_t>(MagicValue >> 8),
+                static_cast<uint8_t>(MagicValue),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 24),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 16),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 8),
@@ -381,7 +422,7 @@ namespace eMMC {
                 }
 
                 // partial write for the last block (so there may be no reading beyond the sourceBuffer's edge)
-                uint8_t lastBlock[logicalBlockSize] = {0};
+                alignas(32) uint8_t lastBlock[logicalBlockSize] = {0};
                 std::memcpy(lastBlock,
                     sourceBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * logicalBlockSize,
                     queueHandler.itemSize % logicalBlockSize);
@@ -410,7 +451,11 @@ namespace eMMC {
 
         // update metadata block
         if (queueHandler.isRebootPersistent) {
-            const uint8_t metadataBuff[logicalBlockSize] = {
+            alignas(32) uint8_t metadataBuff[logicalBlockSize] = {
+                static_cast<uint8_t>(MagicValue >> 24),
+                static_cast<uint8_t>(MagicValue >> 16),
+                static_cast<uint8_t>(MagicValue >> 8),
+                static_cast<uint8_t>(MagicValue),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 24),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 16),
                 static_cast<uint8_t>(queueHandler.headSlotPointer >> 8),
@@ -455,7 +500,13 @@ namespace eMMC {
 
         // update metadata block
         if (queueHandler.isRebootPersistent) {
-            const uint8_t metadataBuff[logicalBlockSize] = {0};
+            alignas(32) uint8_t metadataBuff[logicalBlockSize] = {
+                static_cast<uint8_t>(MagicValue >> 24),
+                static_cast<uint8_t>(MagicValue >> 16),
+                static_cast<uint8_t>(MagicValue >> 8),
+                static_cast<uint8_t>(MagicValue)
+            }; // the head, tail and number of items are initialized to zero
+
             status = writeBlockEMMC(metadataBuff,queueHandler.endBlockAddress + 1, 1);
             if (!status.has_value()) {
                 xSemaphoreGive(queueHandler.semaphoreHandle);
@@ -509,6 +560,12 @@ namespace eMMC {
             if (!success) {
                 return etl::unexpected(Error::EMMC_READ_FAILURE);
             }
+
+            // invalidate the data cache, to ensure that when user tries to read the destBuffer again, a cache miss occurs and
+            // the data is fetched directly from AXI SRAM, and not from the cache. This is required, since the cache is not
+            // aware that the SDMMC's IDMA controller wrote new data to AXI SRAM
+            SCB_InvalidateDCache_by_Addr(destBuffer, logicalBlockSize * numberOfBlocks);
+
             return {};
         }
 
@@ -528,13 +585,17 @@ namespace eMMC {
         return etl::unexpected(Error::EMMC_READ_FAILURE);
     }
 
-    etl::expected<void, Error> eMMC_Utilities::writeBlockEMMC(const uint8_t* sourceBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
+    etl::expected<void, Error> eMMC_Utilities::writeBlockEMMC(uint8_t* sourceBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
         if (xSemaphoreTake(eMMC_access_semaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) != pdTRUE) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
         }
 
         // reset event bits
         xEventGroupClearBits(eventGroupHandle, writeCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit);
+
+        // clean the data cache, to ensure that the data the user wrote in sourceBuffer is sent to AXI SRAM if it
+        // has not already. This is required, as the SDMMC peripheral IDMA controller reads data directly from AXI SRAM
+        SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(sourceBuffer), logicalBlockSize * numberOfBlocks);
 
         if (HAL_MMC_WriteBlocks_IT(hmmc, sourceBuffer, block_address, numberOfBlocks) != HAL_OK) {
             xSemaphoreGive(eMMC_access_semaphoreHandle);
