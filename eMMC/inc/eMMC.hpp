@@ -70,11 +70,31 @@ namespace eMMC {
         eMMC_Utilities() = default;
 
         /**
-         * Initializer for the eMMC driver
+         * This should be called inside the HAL_MMC_TxCpltCallback
+         */
+        static void txIrqHandler();
+
+        /**
+         * This should be called inside the HAL_MMC_RxCpltCallback
+         */
+        static void rxIrqHandler();
+
+        /**
+         * This should be called inside the HAL_MMC_ErrorCallback
+         */
+        static void errorIrqHandler();
+
+        /**
+         * This should be called inside the HAL_MMC_AbortCallback
+         */
+        static void abortIrqHandler();
+
+        /**
+         * @brief Initializer for the eMMC driver
          *
          * @returns The percentage of allocated memory
          */
-        [[nodiscard]] etl::expected<float, Error> initializeResources(MMC_HandleTypeDef* handle);
+        etl::expected<float, Error> initializeResources(MMC_HandleTypeDef* handle);
 
         /** Memory item interface**/
 
@@ -93,6 +113,9 @@ namespace eMMC {
 
         /**
          * @brief Read a partial item
+         * @param destBuffer The buffer the data will be copied to. The driver handles cache coherency issues by invalidating
+         *                   the cache, forcing a new read from AXI SRAM. In order for irrelevant data to not be
+         *                   affected, ensure this buffer is 32 byte aligned, using the alignas(32) specifier
          * @param startBlock The first block to start reading from. For startBlock = 0, the first portion of the item
          *                   is read.
          * @param numOfBlocks How many blocks to read. The startBlock is also included, therefore it needs to be numOfBlocks >= 1
@@ -134,6 +157,9 @@ namespace eMMC {
 
         /**
          * @brief Pop one or more items from the queue. The items are returned in the order they are popped.
+         * @param destBuffer The buffer the data will be copied to. The driver handles cache coherency issues by invalidating
+         *                   the cache, forcing a new read from AXI SRAM. In order for irrelevant data to not be
+         *                   affected, ensure this buffer is 32 byte aligned, using the alignas(32) specifier
          * @note In the scenario the item size is not a multiple of the block size, the function ensures that the leftover
          *       bits in the queue slot are not returned
          * @returns Returns the actual amount of items popped and whether the operation as a whole was successful or not.
@@ -142,6 +168,10 @@ namespace eMMC {
 
         /**
          * @brief Push one or more items to the queue
+         * @param sourceBuffer The buffer the data will be copied from. The driver handles cache coherency issues by cleaning
+         *                     the cache, ensuring the data is written to AXI SRAM, before doing an emmc write. In order
+         *                     for irrelevant data to not be affected, ensure this buffer is 32 byte aligned,
+         *                     using the alignas(32) specifier
          * @returns Returns the actual amount of items pushed and whether the operation as a whole was successful or not.
          */
         [[nodiscard]] etl::pair<uint32_t, Error> pushItemsToQueue(MemoryQueue queue, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t numItems);
@@ -154,7 +184,7 @@ namespace eMMC {
         /**
          * @brief Utility function. Write to eMMC blocks.
          */
-        [[nodiscard]] etl::expected<void, Error> writeBlockEMMC(const uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+        [[nodiscard]] etl::expected<void, Error> writeBlockEMMC(uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
 
         /**
          * @brief Utility function. Read from eMMC blocks.
@@ -164,9 +194,9 @@ namespace eMMC {
         void printError(Error error);
     private:
         /**
-         * Size parameters for the SDINBDG4-8G
+         * Size parameters obtained from HAL drivers (in bytes)
          */
-        uint32_t logicalBlockSize;; // in bytes
+        uint32_t logicalBlockSize = 512;
         uint32_t logicalBlockCount;
         uint64_t memorySizeInBytes;
         float emmcUsage = 0; // percentage of EMMC memory utilized, calculated upon object construction
@@ -186,8 +216,13 @@ namespace eMMC {
         // polling time.
         static constexpr uint32_t SuccessfulTransactionPollingPeriodMs = 1;
         static constexpr uint32_t MaxSuccessfulTransactionDelayMs = 4;
-
         static constexpr uint32_t ErasePollingPeriodMs = 5;
+
+        /**
+         * This value is placed in the start of persistent object metadata blocks, helping the driver figure out upon
+         * initialization if the emmc is new, hence the objects are invalid.
+         */
+        static constexpr uint32_t MagicValue = 0x454D4D43;
 
         /**
          * Hold state for memory regions that store a single item
@@ -214,8 +249,8 @@ namespace eMMC {
          *
          * @note The extra "metadata block" for storing  the head and tail pointers has the following format:
          *
-         *            | headSlotPointer | tailSlotPointer | currentNumberOfItems |   empty   |
-         *  Bytes:           0-31              32 - 63           64 - 95            96 - 512
+         *           | MagicValue | headSlotPointer | tailSlotPointer | currentNumberOfItems |   empty   |
+         *  Bytes:        0-31         32 - 63           64 - 95            96 - 127           128 - 511
          */
         struct MemoryQueueHandler {
             SemaphoreHandle_t semaphoreHandle; // for concurrent access protection to this item
