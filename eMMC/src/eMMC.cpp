@@ -564,7 +564,9 @@ namespace eMMC {
             // invalidate the data cache, to ensure that when user tries to read the destBuffer again, a cache miss occurs and
             // the data is fetched directly from AXI SRAM, and not from the cache. This is required, since the cache is not
             // aware that the SDMMC's IDMA controller wrote new data to AXI SRAM
-            SCB_InvalidateDCache_by_Addr(destBuffer, logicalBlockSize * numberOfBlocks);
+            if (SCB->CCR & SCB_CCR_DC_Msk) {
+                SCB_InvalidateDCache_by_Addr(destBuffer, logicalBlockSize * numberOfBlocks);
+            }
 
             return {};
         }
@@ -595,7 +597,9 @@ namespace eMMC {
 
         // clean the data cache, to ensure that the data the user wrote in sourceBuffer is sent to AXI SRAM if it
         // has not already. This is required, as the SDMMC peripheral IDMA controller reads data directly from AXI SRAM
-        SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(sourceBuffer), logicalBlockSize * numberOfBlocks);
+        if (SCB->CCR & SCB_CCR_DC_Msk) {
+            SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(sourceBuffer), logicalBlockSize * numberOfBlocks);
+        }
 
         if (HAL_MMC_WriteBlocks_IT(hmmc, sourceBuffer, block_address, numberOfBlocks) != HAL_OK) {
             xSemaphoreGive(eMMC_access_semaphoreHandle);
