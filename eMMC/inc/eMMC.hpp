@@ -115,7 +115,8 @@ namespace eMMC {
          * @brief Read a partial item
          * @param destBuffer The buffer the data will be copied to. The driver handles cache coherency issues by invalidating
          *                   the cache, forcing a new read from AXI SRAM. In order for irrelevant data to not be
-         *                   affected, ensure this buffer is 32 byte aligned, using the alignas(32) specifier
+         *                   affected, ensure this buffer is 32 byte aligned, using the alignas(32) specifier. If the
+         *                   cache is disabled, alignment is irrelevant.
          * @param startBlock The first block to start reading from. For startBlock = 0, the first portion of the item
          *                   is read.
          * @param numOfBlocks How many blocks to read. The startBlock is also included, therefore it needs to be numOfBlocks >= 1
@@ -159,7 +160,8 @@ namespace eMMC {
          * @brief Pop one or more items from the queue. The items are returned in the order they are popped.
          * @param destBuffer The buffer the data will be copied to. The driver handles cache coherency issues by invalidating
          *                   the cache, forcing a new read from AXI SRAM. In order for irrelevant data to not be
-         *                   affected, ensure this buffer is 32 byte aligned, using the alignas(32) specifier
+         *                   affected, ensure this buffer is 32 byte aligned, using the alignas(32) specifier. If the
+         *                   cache is disabled, alignment is irrelevant.
          * @note In the scenario the item size is not a multiple of the block size, the function ensures that the leftover
          *       bits in the queue slot are not returned
          * @returns Returns the actual amount of items popped and whether the operation as a whole was successful or not.
@@ -171,7 +173,7 @@ namespace eMMC {
          * @param sourceBuffer The buffer the data will be copied from. The driver handles cache coherency issues by cleaning
          *                     the cache, ensuring the data is written to AXI SRAM, before doing an emmc write. In order
          *                     for irrelevant data to not be affected, ensure this buffer is 32 byte aligned,
-         *                     using the alignas(32) specifier
+         *                      using the alignas(32) specifier. If the cache is disabled, alignment is irrelevant.
          * @returns Returns the actual amount of items pushed and whether the operation as a whole was successful or not.
          */
         [[nodiscard]] etl::pair<uint32_t, Error> pushItemsToQueue(MemoryQueue queue, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t numItems);
