@@ -1296,71 +1296,91 @@ namespace AT86RF215 {
         }
     }
 
-    void At86rf215_Utilities::handle_irq(Error &err) {
+     IrqStatus At86rf215_Utilities::handle_irq(Error &err) {
         if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(spiAccessMutexTimeoutMs)) != pdTRUE) {
             err = Error::SPI_ACCESS_MUTEX_TIMEOUT;
-            return;
+            return {};
+        }
+
+        // Read all interrupt registers
+        IrqStatus irqStatus;
+        irqStatus.rf09_irqs_status = spi_read_8(RegisterAddress::RF09_IRQS, err);
+        if (err != Error::NO_ERRORS) {
+            return irqStatus;
+        }
+
+        irqStatus.bbc0_irqs_status = spi_read_8(RegisterAddress::BBC0_IRQS, err);
+        if (err != Error::NO_ERRORS) {
+            return irqStatus;
+        }
+
+        irqStatus.rf24_irqs_status = spi_read_8(RegisterAddress::RF24_IRQS, err);
+        if (err != Error::NO_ERRORS) {
+            return irqStatus;
+        }
+
+        irqStatus.bbc1_irqs_status = spi_read_8(RegisterAddress::BBC1_IRQS, err);
+        if (err != Error::NO_ERRORS) {
+            return irqStatus;
         }
 
         // BaseType_t xHigherPriorityTaskWoken = pdFALSE;
         /* Sub 1-GHz Transceiver */
 
-        // Radio IRQ
-        volatile uint8_t irq = spi_read_8(RegisterAddress::RF09_IRQS, err);
-        if ((irq & InterruptMask::IFSynchronization) != 0) {
+        // Radio IRQ handling
+        if ((irqStatus.rf09_irqs_status.value() & InterruptMask::IFSynchronization) != 0) {
             // I/Q IF Synchronization Failure handling
             IFSynchronization_flag = true;
         }
-        if ((irq & InterruptMask::TransceiverError) != 0) {
+        if ((irqStatus.rf09_irqs_status.value() & InterruptMask::TransceiverError) != 0) {
             // Transceiver Error handling
             TransceiverError_flag = true;
         }
-        if ((irq & InterruptMask::BatteryLow) != 0) {
+        if ((irqStatus.rf09_irqs_status.value() & InterruptMask::BatteryLow) != 0) {
             // Battery Low handling
             BatteryLow_flag = true;
         }
-        if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
+        if ((irqStatus.rf09_irqs_status.value() & InterruptMask::EnergyDetectionCompletion) != 0) {
             EnergyDetectionCompletion_flag = true;
             xEventGroupSetBits(eventGroupHandle, energyDetCompletion09GroupBit);
         }
-        if ((irq & InterruptMask::TransceiverReady) != 0) {
+        if ((irqStatus.rf09_irqs_status.value() & InterruptMask::TransceiverReady) != 0) {
             TransceiverReady_flag = true;
             xEventGroupSetBits(eventGroupHandle, transceiver09Ready);
         }
-        if ((irq & InterruptMask::Wakeup) != 0) {
+        if ((irqStatus.rf09_irqs_status.value() & InterruptMask::Wakeup) != 0) {
             Wakeup_flag = true;
             // Wakeup handling
         }
 
-        /// Baseband IRQ
-        irq = spi_read_8(RegisterAddress::BBC0_IRQS, err);
-        if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
+        /// Baseband IRQ handling
+        if ((irqStatus.bbc0_irqs_status.value() & InterruptMask::FrameBufferLevelIndication) != 0) {
             // Frame Buffer Level Indication handling
             FrameBufferLevelIndication_flag = true;
         }
-        if ((irq & InterruptMask::AGCRelease) != 0) {
+        if ((irqStatus.bbc0_irqs_status.value() & InterruptMask::AGCRelease) != 0) {
             // AGC Release handling
             AGCRelease_flag = true;
         }
-        if ((irq & InterruptMask::AGCHold) != 0) {
+        if ((irqStatus.bbc0_irqs_status.value() & InterruptMask::AGCHold) != 0) {
             // AGC Hold handling
             AGCHold_flag = true;
         }
-        if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
+        if ((irqStatus.bbc0_irqs_status.value() & InterruptMask::TransmitterFrameEnd) != 0) {
             TransmitterFrameEnd_flag = true;
 
             // notify packetTransmissionBaseband() about successful transmission
             xEventGroupSetBits(eventGroupHandle, basebandTx09GroupBit);
         }
-        if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
+        if ((irqStatus.bbc0_irqs_status.value() & InterruptMask::ReceiverExtendMatch) != 0) {
             // Receiver Extended Match handling
             ReceiverExtendMatch_flag = true;
         }
-        if ((irq & InterruptMask::ReceiverAddressMatch) != 0) {
+        if ((irqStatus.bbc0_irqs_status.value() & InterruptMask::ReceiverAddressMatch) != 0) {
             // Receiver Address Match handling
             ReceiverAddressMatch_flag = true;
         }
-        if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
+        if ((irqStatus.bbc0_irqs_status.value() & InterruptMask::ReceiverFrameEnd) != 0) {
             ReceiverFrameEnd_flag = true;
             RegisterAddress regrxflh = BBC0_RXFLH;
             RegisterAddress regrxfll = BBC0_RXFLL;
@@ -1371,7 +1391,7 @@ namespace AT86RF215 {
             // notify packetReceptionBaseband() and unlock transceiver
             xEventGroupSetBits(eventGroupHandle, basebandRx09GroupBit | transceiverUnoccupied09GroupBit);
         }
-        if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
+        if ((irqStatus.bbc0_irqs_status.value() & InterruptMask::ReceiverFrameStart) != 0) {
             ReceiverFrameStart_flag = true;
 
             // Reception started. Immediately lock tranceiver so there are no interruptions
@@ -1380,62 +1400,59 @@ namespace AT86RF215 {
 
         /* 2.4 GHz Transceiver */
 
-        // Radio IRQ
-        irq = spi_read_8(RegisterAddress::RF24_IRQS, err);
-
-        if ((irq & InterruptMask::IFSynchronization) != 0) {
+        // Radio IRQ handling
+        if ((irqStatus.rf24_irqs_status.value() & InterruptMask::IFSynchronization) != 0) {
             // I/Q IF Synchronization Failure handling
             IFSynchronization_flag = true;
         }
-        if ((irq & InterruptMask::TransceiverError) != 0) {
+        if ((irqStatus.rf24_irqs_status.value() & InterruptMask::TransceiverError) != 0) {
             // Transceiver Error handling
             TransceiverError_flag = true;
         }
-        if ((irq & InterruptMask::BatteryLow) != 0) {
+        if ((irqStatus.rf24_irqs_status.value() & InterruptMask::BatteryLow) != 0) {
             BatteryLow_flag = true;
             // Battery Low handling
         }
-        if ((irq & InterruptMask::EnergyDetectionCompletion) != 0) {
+        if ((irqStatus.rf24_irqs_status.value() & InterruptMask::EnergyDetectionCompletion) != 0) {
             EnergyDetectionCompletion_flag = true;
             xEventGroupSetBits(eventGroupHandle, energyDetCompletion24GroupBit);
         }
-        if ((irq & InterruptMask::TransceiverReady) != 0) {
+        if ((irqStatus.rf24_irqs_status.value() & InterruptMask::TransceiverReady) != 0) {
             TransceiverReady_flag = true;
             xEventGroupSetBits(eventGroupHandle, transceiver24Ready);
         }
-        if ((irq & InterruptMask::Wakeup) != 0) {
+        if ((irqStatus.rf24_irqs_status.value() & InterruptMask::Wakeup) != 0) {
             // Wakeup handling
             Wakeup_flag = true;
         }
 
-        //Baseband IRQ
-        irq = spi_read_8(RegisterAddress::BBC1_IRQS, err);
-        if ((irq & InterruptMask::FrameBufferLevelIndication) != 0) {
+        //Baseband IRQ handling
+        if ((irqStatus.bbc1_irqs_status.value() & InterruptMask::FrameBufferLevelIndication) != 0) {
             // Frame Buffer Level Indication handling
             FrameBufferLevelIndication_flag = true;
         }
-        if ((irq & InterruptMask::AGCRelease) != 0) {
+        if ((irqStatus.bbc1_irqs_status.value() & InterruptMask::AGCRelease) != 0) {
             // AGC Release handling
             AGCRelease_flag = true;
         }
-        if ((irq & InterruptMask::AGCHold) != 0) {
+        if ((irqStatus.bbc1_irqs_status.value() & InterruptMask::AGCHold) != 0) {
             AGCHold_flag = true;
         }
-        if ((irq & InterruptMask::TransmitterFrameEnd) != 0) {
+        if ((irqStatus.bbc1_irqs_status.value() & InterruptMask::TransmitterFrameEnd) != 0) {
             TransmitterFrameEnd_flag = true;
 
             // notify packetTransmissionBaseband() about successful transmission
             xEventGroupSetBits(eventGroupHandle, basebandTx24GroupBit);
         }
-        if ((irq & InterruptMask::ReceiverExtendMatch) != 0) {
+        if ((irqStatus.bbc1_irqs_status.value() & InterruptMask::ReceiverExtendMatch) != 0) {
             // Receiver Extended Match handling
             ReceiverExtendMatch_flag = true;
         }
-        if ((irq & InterruptMask::ReceiverAddressMatch) != 0) {
+        if ((irqStatus.bbc1_irqs_status.value() & InterruptMask::ReceiverAddressMatch) != 0) {
             // Receiver Address Match handling
             ReceiverAddressMatch_flag = true;
         }
-        if ((irq & InterruptMask::ReceiverFrameEnd) != 0) {
+        if ((irqStatus.bbc1_irqs_status.value() & InterruptMask::ReceiverFrameEnd) != 0) {
             ReceiverFrameEnd_flag = true;
             RegisterAddress regrxflh = BBC1_RXFLH;
             RegisterAddress regrxfll = BBC1_RXFLL;
@@ -1446,7 +1463,7 @@ namespace AT86RF215 {
             // notify packetReceptionBaseband() and unlock transceiver
             xEventGroupSetBits(eventGroupHandle, basebandRx24GroupBit | transceiverUnoccupied24GroupBit);
         }
-        if ((irq & InterruptMask::ReceiverFrameStart) != 0) {
+        if ((irqStatus.bbc1_irqs_status.value() & InterruptMask::ReceiverFrameStart) != 0) {
             ReceiverFrameStart_flag = true;
 
             // Reception started. Immediately lock tranceiver so there are no interruptions
@@ -1454,6 +1471,7 @@ namespace AT86RF215 {
         }
 
         xSemaphoreGive(spiAccessMutexHandle);
+        return irqStatus;
     }
 
     /** =========== Private functions  =========== **/
@@ -1629,7 +1647,7 @@ namespace AT86RF215 {
                 }
                 break;
             case State::RF_NOP:
-                [[fallthrough]]
+                [[fallthrough]];
             case State::RF_RESET:
                 break;
             case State::RF_SLEEP:

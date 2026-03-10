@@ -12,10 +12,18 @@
 #include "Logger.hpp"
 #include "at86rf215definitions.hpp"
 #include "at86rf215config.hpp"
+#include "etl/optional.h"
 
 typedef struct __SPI_HandleTypeDef SPI_HandleTypeDef;
 
 namespace AT86RF215 {
+    struct IrqStatus {
+        etl::optional<uint8_t> rf09_irqs_status;
+        etl::optional<uint8_t> rf24_irqs_status;
+        etl::optional<uint8_t> bbc0_irqs_status;
+        etl::optional<uint8_t> bbc1_irqs_status;
+    };
+
     typedef struct {
         uint8_t dotDashMapping;  // 0bXX represents the dot-dash mapping (e.g., 0b01 for dot-dash)
         uint8_t dotDashNum;      // The number of symbols in the Morse code
@@ -103,8 +111,10 @@ namespace AT86RF215 {
          * This method reads the transceiver interrupt code and takes any necessary actions.
          * It should be used inside a high priority freertos task, dedicated solely to transceiver irq handling.
          *
+         * @returns A struct with the status of the interrupt registes (RF09_IRQS, RF24_IRQS, BBC0_IRQS, BBC1_IRQS)
+         *
          */
-        void handle_irq(Error &err);
+        IrqStatus handle_irq(Error &err);
 
         /**
          * Update the configuration structures.
