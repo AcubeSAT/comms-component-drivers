@@ -1,29 +1,25 @@
 #pragma once
 
 namespace AT86RF215 {
-    /// "External" event group bits. The user must trigger these events from the proper ISR or freertos task
-    ///  For the transceiver unoccupied group bits the logic is "backwards" (1 for unoccupied), since some
-    ///  functions need to wait for the transceiver to become available, using xEventGroupWaitBits().
-    inline constexpr uint32_t spiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
-    inline constexpr uint32_t spiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
-    inline constexpr uint32_t transceiverUnoccupied09GroupBit     = 1U << 2; // Indicates that the sub GHz radio is free to use *
-    inline constexpr uint32_t transceiverUnoccupied24GroupBit     = 1U << 3; // indicates that the 2.4 GHz radio is free to use *
-    inline constexpr uint32_t iqEecTransmissionComplete09GroupBit = 1U << 4; // completion of tx using I/Q interface with embedded control
-    inline constexpr uint32_t iqPreambleReception09GroupBit       = 1U << 5; // reception of a preamble using the I/Q interface
-    inline constexpr uint32_t iqPacketReception09GroupBit         = 1U << 6; // full reception of a packet using the I/Q interface
-    inline constexpr uint32_t iqEecTransmissionComplete24GroupBit = 1U << 7; // completion of tx using I/Q interface with embedded control
-    inline constexpr uint32_t iqPreambleReception24GroupBit       = 1U << 8; // reception of a preamble using the I/Q interface
-    inline constexpr uint32_t iqPacketReception24GroupBit         = 1U << 9; // full reception of a packet using the I/Q interface
+    /// "External" event group bits. The user must trigger these events from the proper ISR or freertos task.
+    inline constexpr uint32_t SpiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
+    inline constexpr uint32_t SpiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
+    inline constexpr uint32_t IqPreambleReception09GroupBit       = 1U << 2; // reception of a preamble using the I/Q interface
+    inline constexpr uint32_t IqPacketReception09GroupBit         = 1U << 3; // full reception of a packet using the I/Q interface
+    inline constexpr uint32_t IqPreambleReception24GroupBit       = 1U << 4; // reception of a preamble using the I/Q interface
+    inline constexpr uint32_t IqPacketReception24GroupBit         = 1U << 5; // full reception of a packet using the I/Q interface
 
-    /// "Internal" event group bits. Used for communication of certain driver functions with handle_irq()
-    inline constexpr uint32_t transceiver09Ready            = 1U << 10; // signal about TXPREP interrupt
-    inline constexpr uint32_t transceiver24Ready            = 1U << 11;
-    inline constexpr uint32_t basebandTx09GroupBit          = 1U << 12; // signal finished transmission for sub GHz baseband core
-    inline constexpr uint32_t basebandTx24GroupBit          = 1U << 13; // signal finished transmission for 2.4 baseband core
-    inline constexpr uint32_t basebandRx09GroupBit          = 1U << 14; // signal finished reception for sub GHz baseband core
-    inline constexpr uint32_t basebandRx24GroupBit          = 1U << 15; // signal finished reception for 2.4 GHz baseband core
-    inline constexpr uint32_t energyDetCompletion09GroupBit = 1U << 16;
-    inline constexpr uint32_t energyDetCompletion24GroupBit = 1U << 17;
+    /// "Internal" event group bits. Used for communication of certain driver functions with handleIrq()
+    inline constexpr uint32_t Transceiver09Ready            = 1U << 6; // signal about TXPREP interrupt
+    inline constexpr uint32_t Transceiver24Ready            = 1U << 7;
+    inline constexpr uint32_t BasebandTx09GroupBit          = 1U << 8; // signal finished transmission for sub GHz baseband core
+    inline constexpr uint32_t BasebandTx24GroupBit          = 1U << 9; // signal finished transmission for 2.4 baseband core
+    inline constexpr uint32_t BasebandRx09GroupBit          = 1U << 10; // signal finished reception for sub GHz baseband core
+    inline constexpr uint32_t BasebandRx24GroupBit          = 1U << 11; // signal finished reception for 2.4 GHz baseband core
+    inline constexpr uint32_t EnergyDetCompletion09GroupBit = 1U << 12;
+    inline constexpr uint32_t EnergyDetCompletion24GroupBit = 1U << 13;
+
+    inline constexpr uint32_t AllEventBitsMask = 0xFFFF;
 
     /// RFn_STATE
     enum class State {
@@ -201,19 +197,17 @@ namespace AT86RF215 {
     };
 
     enum class DevicePartNumber {
-        AT86RF215_INVALID = 0x00,
         AT86RF215 = 0x34,
         AT86RF215IQ = 0x35,
         AT86RF215M = 0x36,
     };
 
     enum class DeviceVersionNumber {
-        INVALID_VERSION_NUMBER = 0x00,
         V1 = 0x01,
         V3 = 0x03
     };
 
-    enum RegisterBitmasks {
+    enum class RegisterBitmasks {
         RF09_IRQS_IQIFSF = 0x20, ///< Set to 1 if I/Q sync fails
         RF09_IRQS_TRXERR = 0x10, ///< Set to 1 if transceiver error is detected
         RF09_IRQS_BATLOW = 0x08, ///< Set to 1 if EVDD voltage is below threshold
@@ -299,7 +293,7 @@ namespace AT86RF215 {
         TRIM_18 = 0x6, ///< +1.8pF
         TRIM_21 = 0x7, ///< +2.1pF
         TRIM_24 = 0x8, ///< +2.4pF
-        TRIM_27 = 0x7, ///< +2.7pF
+        TRIM_27 = 0x9, ///< +2.7pF
         TRIM_30 = 0xa, ///< +3.0pF
         TRIM_33 = 0xb, ///< +3.3pF
         TRIM_36 = 0xc, ///< +3.6pF
@@ -308,11 +302,11 @@ namespace AT86RF215 {
         TRIM_45 = 0xf, ///< +4.5pF
         TRIM_INV = 0xff,
     };
+
     /*
-*
-* Distinguish between sub-1GHz transceiver and 2.4 GHz transceiver
-*/
-    enum Transceiver {
+     * Distinguish between sub-1GHz transceiver and 2.4 GHz transceiver
+     */
+    enum class Transceiver {
         RF09 = 0,
         RF24 = 1,
     };
@@ -607,7 +601,7 @@ namespace AT86RF215 {
         BB_MROQPSK = 0x3,
     };
 
-    enum RegisterAddress {
+    enum class RegisterAddress {
         RF09_IRQS = 0x00, ///< Contains radio I/Q status
         RF24_IRQS = 0x01, ///< Contains radio I/Q status
         BBC0_IRQS = 0x02,

@@ -66,7 +66,7 @@ namespace AT86RF215 {
         }
 
         // update params
-        void setRXBWC(Transceiver transceiver, ReceiverBandwidth bw, bool inversion, bool shift) {
+        void setRxbwc(Transceiver transceiver, ReceiverBandwidth bw, bool inversion, bool shift) {
             if (transceiver == Transceiver::RF09) {
                 receiverBandwidth09 = bw;
                 ifInversion09 = inversion;
@@ -80,7 +80,7 @@ namespace AT86RF215 {
         }
 
         //
-        void setRXDFE(Transceiver transceiver, RxRelativeCutoffFrequency cutoff, ReceiverSampleRate sampleRate) {
+        void setRxdfe(Transceiver transceiver, RxRelativeCutoffFrequency cutoff, ReceiverSampleRate sampleRate) {
             if (transceiver == Transceiver::RF09) {
                 rxRelativeCutoffFrequency09 = cutoff;
                 receiverSampleRate09 = sampleRate;
@@ -92,7 +92,7 @@ namespace AT86RF215 {
         }
 
         //
-        void setEDC(Transceiver transceiver, EnergyDetectionTimeBasis timeBasis, EnergyDetectionMode mode,
+        void setEdc(Transceiver transceiver, EnergyDetectionTimeBasis timeBasis, EnergyDetectionMode mode,
                     uint8_t detectFactor) {
             if (transceiver == Transceiver::RF09) {
                 energyDetectionBasis09 = timeBasis;
@@ -107,7 +107,7 @@ namespace AT86RF215 {
         }
 
         //
-        void setAGCC(Transceiver transceiver, bool input, AverageTimeNumberSamples avgSamples, AGCEnable enabled,
+        void setAgcc(Transceiver transceiver, bool input, AverageTimeNumberSamples avgSamples, AGCEnable enabled,
                      AutomaticGainTarget target) {
             if (transceiver == Transceiver::RF09) {
                 agcInput09 = input;
@@ -136,7 +136,7 @@ namespace AT86RF215 {
         PowerAmplifierCurrentControl powerAmplifierCurrentControl09, powerAmplifierCurrentControl24;
         uint8_t txOutPower09, txOutPower24;
 
-        static TXConfig DefaultTXConfig() {
+        static TXConfig defaultTXConfig() {
             return {
                     // RFn_TXDFE
                     .txRelativeCutoffFrequency09 = TxRelativeCutoffFrequency::FCUT_0375,
@@ -159,7 +159,7 @@ namespace AT86RF215 {
                     .txOutPower09 = 0x1F,
                     .txOutPower24 = 0x00};
         }
-        void setTXDFE(Transceiver transceiver, TxRelativeCutoffFrequency cutoffFrequency, Direct_Mod_Enable_FSKDM modulation, TransmitterSampleRate sampleRate) {
+        void setTxdfe(Transceiver transceiver, TxRelativeCutoffFrequency cutoffFrequency, Direct_Mod_Enable_FSKDM modulation, TransmitterSampleRate sampleRate) {
             if (transceiver == Transceiver::RF09) {
                 txRelativeCutoffFrequency09 = cutoffFrequency;
                 directModulation09 = modulation;
@@ -171,7 +171,7 @@ namespace AT86RF215 {
                 transceiverSampleRate24 = sampleRate;
             }
         }
-        void setTXCUTC(Transceiver transceiver, PowerAmplifierRampTime rampTime, TransmitterCutOffFrequency cutoffFrequency) {
+        void setTxcutc(Transceiver transceiver, PowerAmplifierRampTime rampTime, TransmitterCutOffFrequency cutoffFrequency) {
             if (transceiver == Transceiver::RF09) {
                 powerAmplifierRampTime09 = rampTime;
                 transmitterCutOffFrequency09 = cutoffFrequency;
@@ -181,7 +181,7 @@ namespace AT86RF215 {
                 transmitterCutOffFrequency24 = cutoffFrequency;
             }
         }
-        void setRFnPAC(Transceiver transceiver, PowerAmplifierCurrentControl currentControl, uint8_t outPower) {
+        void setRfnpac(Transceiver transceiver, PowerAmplifierCurrentControl currentControl, uint8_t outPower) {
             if (transceiver == Transceiver::RF09) {
                 powerAmplifierCurrentControl09 = currentControl;
                 txOutPower09 = outPower;
@@ -233,7 +233,7 @@ namespace AT86RF215 {
         FSK_Preamphasis_Enable fskPreamphasisEnable_09, fskPreamphasisEnable_24;
         Direct_Mod_Enable_FSKDM directModEnableFskdm_09, directModEnableFskdm_24;
 
-        static BasebandCoreConfig DefaultBasebandCoreConfig() {
+        static BasebandCoreConfig defaultBasebandCoreConfig() {
             return {
                     /// BBCn_PC
                     .continuousTransmit09 = false,
@@ -306,7 +306,7 @@ namespace AT86RF215 {
             };
         }
         /// BBC_PC
-        void setBBC_PC(Transceiver transceiver, bool ct, bool fcsfEn, bool tautoFcs, FrameCheckSequenceType fcsType, bool bbEn, PhysicalLayerType plType) {
+        void setBbcPc(Transceiver transceiver, bool ct, bool fcsfEn, bool tautoFcs, FrameCheckSequenceType fcsType, bool bbEn, PhysicalLayerType plType) {
             if (transceiver == Transceiver::RF09) {
                 continuousTransmit09 = ct;
                 frameCheckSequenceFilterEn09 = fcsfEn;
@@ -325,7 +325,7 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC0
-        void setBBC_FSKC0(Transceiver transceiver, Bandwidth_time_product bwTime, Mod_index_scale midxs,
+        void setBbcFskc0(Transceiver transceiver, Bandwidth_time_product bwTime, Mod_index_scale midxs,
                           Mod_index midx, FSK_mod_order mord) {
             if (transceiver == Transceiver::RF09) {
                 bandwidth_time_09 = bwTime;
@@ -341,7 +341,7 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC1
-        void setBBC_FSKC1(Transceiver transceiver, Freq_Inversion freqInv, MR_FSK_symbol_rate sr) {
+        void setBbcFskc1(Transceiver transceiver, Freq_Inversion freqInv, MR_FSK_symbol_rate sr) {
             if (transceiver == Transceiver::RF09) {
                 freq_inv_09 = freqInv;
                 sr_09 = sr;
@@ -352,7 +352,7 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC2
-        void setBBC_FSKC2(Transceiver transceiver, Preamble_Detection preambleDet, Receiver_Override recOverride,
+        void setBbcFskc2(Transceiver transceiver, Preamble_Detection preambleDet, Receiver_Override recOverride,
                           Receiver_Preamble_Timeout recPreambleTimeout, Mode_Switch_Enable modeSwitchEn,
                           Preamble_Inversion preambleInv, FEC_Scheme fecScheme,
                           Interleaving_Enable interleavingEn) {
@@ -376,7 +376,7 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC3
-        void setBBC_FSKC3(Transceiver transceiver, SFD_Detection_Threshold sfdDetectionThreshold, Preamble_Detection_Threshold preambleDetectionThreshold) {
+        void setBbcFskc3(Transceiver transceiver, SFD_Detection_Threshold sfdDetectionThreshold, Preamble_Detection_Threshold preambleDetectionThreshold) {
             if (transceiver == Transceiver::RF09) {
                 sfdt_09 = sfdDetectionThreshold;
                 prdt_09 = preambleDetectionThreshold;
@@ -387,7 +387,7 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC4
-        void setBBC_FSKC4(Transceiver transceiver, SFD_Quantization sfdQuantization, SFD_32 sfd32,
+        void setBbcFskc4(Transceiver transceiver, SFD_Quantization sfdQuantization, SFD_32 sfd32,
                           Raw_Mode_Reversal_Bit rawModeReversalBit,
                           CSFD1 csfd1, CSFD0 csfd2) {
             if (transceiver == Transceiver::RF09) {
@@ -406,7 +406,7 @@ namespace AT86RF215 {
             }
         }
         /// BBCn_FSKPHRTX
-        void set_BBC_FSKPHRTX(Transceiver transceiver, SFD_Used sfdused, Data_Whitening dataWhitening) {
+        void setBbcFskphrtx(Transceiver transceiver, SFD_Used sfdused, Data_Whitening dataWhitening) {
             if (transceiver == Transceiver::RF09) {
                 sfdUsed_09 = sfdused;
                 dataWhitening_09 = dataWhitening;
@@ -417,7 +417,7 @@ namespace AT86RF215 {
             }
         }
         /// BBCn_FSKDM
-        void set_BBC_FSKDM(Transceiver transceiver, FSK_Preamphasis_Enable fskPreamphasisEnable, Direct_Mod_Enable_FSKDM directModEnableFskdm) {
+        void setBbcFskdm(Transceiver transceiver, FSK_Preamphasis_Enable fskPreamphasisEnable, Direct_Mod_Enable_FSKDM directModEnableFskdm) {
             if (transceiver == Transceiver::RF09) {
                 fskPreamphasisEnable_09 = fskPreamphasisEnable;
                 directModEnableFskdm_09 = directModEnableFskdm;
@@ -434,25 +434,25 @@ namespace AT86RF215 {
         bool validConfig09, validConfig24;
 
         /// Cached frequency for easy access
-        uint32_t frequency09, frequency24; // Frequency in kHz
+        uint64_t frequency09, frequency24; // Frequency in kHz
 
         /// RFn_CNM
         PLLChannelMode channelMode09, channelMode24;
         /// RFn_PLL
         PLLBandwidth loopBandwidth09, loopBandwidth24;
 
-        static FrequencySynthesizerConfig DefaultFrequencySynthesizerConfig() {
+        static FrequencySynthesizerConfig defaultFrequencySynthesizerConfig() {
             FrequencySynthesizerConfig fs;
-            fs.setup_FrequencySynthesizer(Transceiver::RF09, 436500, PLLChannelMode::FineResolution450, PLLBandwidth::BWDefault);
-            fs.setup_FrequencySynthesizer(Transceiver::RF24, 2425000, PLLChannelMode::FineResolution2443, PLLBandwidth::BWDefault);
+            fs.setupFrequencySynthesizer(Transceiver::RF09, 436500, PLLChannelMode::FineResolution450, PLLBandwidth::BWDefault);
+            fs.setupFrequencySynthesizer(Transceiver::RF24, 2425000, PLLChannelMode::FineResolution2443, PLLBandwidth::BWDefault);
             return fs;
         }
 
         // Frequency must be given in kHz. If the given frequency and channel mode are incompatible
         // with the given transceiver, the validConfig flag will be set to false.
-        void setup_FrequencySynthesizer(Transceiver transceiver, uint32_t frequency, PLLChannelMode channelMode, PLLBandwidth bw) {
+        void setupFrequencySynthesizer(Transceiver transceiver, uint32_t frequency, PLLChannelMode channelMode, PLLBandwidth bw) {
 
-            transceiver == RF09 ? (validConfig09 = false) : (validConfig24 = false);
+            transceiver == Transceiver::RF09 ? (validConfig09 = false) : (validConfig24 = false);
 
             if (channelMode == PLLChannelMode::IEECompliant) {
                 // @TODO: CCF0 and CS for each band in 68d, 68e tables of IEEE Std 802.15.4g™-2012
@@ -483,7 +483,7 @@ namespace AT86RF215 {
                 loopBandwidth24 = bw;
             }
 
-            transceiver == RF09 ? (validConfig09 = true) : (validConfig24 = true);
+            transceiver == Transceiver::RF09 ? (validConfig09 = true) : (validConfig24 = true);
         }
 
     };
@@ -497,7 +497,7 @@ namespace AT86RF215 {
         PowerAmplifierVoltageControl powerAmplifierVoltageControl09, powerAmplifierVoltageControl24;
         /// RFn_PADFE
         ExternalFrontEndControl externalFrontEnd_09, externalFrontEnd_24;
-        static ExternalFrontEndConfig DefaultExternalFrontEndConfig() {
+        static ExternalFrontEndConfig defaultExternalFrontEndConfig() {
             return {
                     .externalLNABypass09 = ExternalLNABypass::FALSE,
                     .externalLNABypass24 = ExternalLNABypass::FALSE,
@@ -513,7 +513,7 @@ namespace AT86RF215 {
                     .externalFrontEnd_24 = ExternalFrontEndControl::front_end_config_txrx_switch
                     };
         }
-        void set_RFn_AUXS(
+        void setRfnAuxs(
                 Transceiver transceiver,
                 ExternalLNABypass extLNA,            // externalLNABypass09
                 AutomaticGainControlMAP agcMap,      // automaticGainControlMAP09
@@ -537,7 +537,7 @@ namespace AT86RF215 {
             }
         }
 
-        void set_RFn_PADFE(Transceiver transceiver, ExternalFrontEndControl externalFrontEndControl) {
+        void setRfnPadfe(Transceiver transceiver, ExternalFrontEndControl externalFrontEndControl) {
             if (transceiver == Transceiver::RF09) {
                 externalFrontEnd_09 = externalFrontEndControl;
             }
@@ -559,7 +559,7 @@ namespace AT86RF215 {
         ChipMode chipMode;
         SkewAlignment skewAlignment;
 
-        static IQInterfaceConfig DefaultIQInterfaceConfig() {
+        static IQInterfaceConfig defaultIQInterfaceConfig() {
             return {
                     // RF_IQIFC0
                     .externalLoopback = ExternalLoopback::DISABLED,
@@ -568,12 +568,12 @@ namespace AT86RF215 {
                     .iqmodeVoltageIEE = IQmodeVoltageIEE::IEEE,
                     .embeddedControlTX = EmbeddedControlTX::ENABLED,
                     // RF_IQIFC1
-                    //.chipMode = ChipMode::RF_MODE_RF,  // I/Q mode for both transceivers
-                    .chipMode = ChipMode::RF_MODE_BBRF24, // baseband mode on sub GHz transceiver (debugging)
+                    .chipMode = ChipMode::RF_MODE_BBRF,  // I/Q mode for both transceivers
+                    //.chipMode = ChipMode::RF_MODE_BBRF24, // baseband mode on sub GHz transceiver (debugging)
                     .skewAlignment = SkewAlignment::SKEW3906NS};
         }
 
-        void set_RF_IQIFC0(
+        void setRfIqfc0(
                 ExternalLoopback external_Loopback,
                 IQOutputCurrent iqOutput_Current,
                 IQmodeVoltage iqmode_Voltage,
@@ -587,7 +587,7 @@ namespace AT86RF215 {
             iqmodeVoltageIEE = iqmodeVoltage_IEE;
             embeddedControlTX = embeddedControl_Tx;
         }
-        void set_RF_IQIFC1(ChipMode chip_Mode, SkewAlignment skew_alignment) {
+        void setRfIqifc1(ChipMode chip_Mode, SkewAlignment skew_alignment) {
             chipMode = chip_Mode;
             skewAlignment = skew_alignment;
         }
@@ -604,7 +604,7 @@ namespace AT86RF215 {
         bool receiverFrameEnd09, receiverFrameEnd24;
         bool receiverFrameStart09, receiverFrameStart24;
 
-        static BasebandCoreInterruptsConfig DefaultBasebandCoreInterruptsConfig() {
+        static BasebandCoreInterruptsConfig defaultBasebandCoreInterruptsConfig() {
             return {
                     .frameBufferLevelIndication09 = true,
                     .frameBufferLevelIndication24 = true,
@@ -665,7 +665,7 @@ namespace AT86RF215 {
         bool transceiverReady09, transceiverReady24;
         bool wakeup09, wakeup24;
 
-        static RadioInterruptsConfig DefaultRadioInterruptsConfig() {
+        static RadioInterruptsConfig defaultRadioInterruptsConfig() {
             return {
                     // RFn_IRQM
                     .iqIfSynchronizationFailure09 = true,
@@ -725,7 +725,7 @@ namespace AT86RF215 {
         CrystalTrim crystalTrim;
         bool fastStartUp;
 
-        static struct GeneralConfiguration DefaultGeneralConfig() {
+        static struct GeneralConfiguration defaultGeneralConfig() {
             return {
                     .irqMaskMode = true,
                     .irqPolarity = IRQPolarity::ACTIVE_HIGH,
@@ -739,18 +739,18 @@ namespace AT86RF215 {
             };
         }
 
-        void setup_RF_CFG(bool irq_mask_mode, IRQPolarity irq_polarity, PadDriverStrength pad_driver_strength) {
+        void setupRfCfg(bool irq_mask_mode, IRQPolarity irq_polarity, PadDriverStrength pad_driver_strength) {
             irqMaskMode = irq_mask_mode;
             irqPolarity = irq_polarity;
             padDriverStrength = pad_driver_strength;
         }
 
-        void setup_RF_BMDVC(BatteryMonitorVoltageThreshold battery_monitor_voltage_threshold, BatteryMonitorHighRange battery_monitor_high_range) {
+        void setupRfBmdvc(BatteryMonitorVoltageThreshold battery_monitor_voltage_threshold, BatteryMonitorHighRange battery_monitor_high_range) {
             batteryMonitorVoltage = battery_monitor_voltage_threshold;
             batteryMonitorHighRange = battery_monitor_high_range;
         }
 
-        void setup_RF_XOC(CrystalTrim crystal_trim, bool fast_startup) {
+        void setupRdXoc(CrystalTrim crystal_trim, bool fast_startup) {
             crystalTrim = crystal_trim;
             fastStartUp = fast_startup;
         }
