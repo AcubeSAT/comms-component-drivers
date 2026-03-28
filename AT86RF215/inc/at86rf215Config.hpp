@@ -1,8 +1,34 @@
+/**
+ * @file at86rf215Config.hpp
+ *
+ * @brief This file contains objects that hold the configuration of the transceiver. They are used to configure
+ *        the transceiver upon calling the chipReset() function, and should be considered the single source of truth.
+ *
+ * @details Any api function that needs to modify the configuration must do so temporarily, restoring the original one.
+ *          These configuration objects contain a "default configuration", which is set for the needs of the AcubeSAT
+ *          mission.
+ */
+
 #pragma once
-#include <cstdint>
-#include "at86rf215definitions.hpp"
+#include "at86rf215Definitions.hpp"
 
 namespace AT86RF215 {
+    /// Define here how long the transceiver should wait for certain events, before throwing an error (milliseconds).
+    static constexpr uint16_t SpiAccessMutexTimeoutMs              = 100;
+    static constexpr uint16_t SpiByteWriteCompleteDelayMs          = 100;
+    static constexpr uint16_t SpiByteReadCompleteDelayMs           = 100;
+    static constexpr uint16_t Radio09AccessMutexDelayMs            = 100;
+    static constexpr uint16_t Radio24AccessMutexDelayMs            = 100;
+    static constexpr uint16_t IqTxInterfaceAccessMutexDelayMs      = 100;
+    static constexpr uint16_t IqPacketReception09DelayMs           = 100;
+    static constexpr uint16_t IqPacketReception24DelayMs           = 100;
+    static constexpr uint16_t BasebandCorePacketReception09DelayMs = 100;
+    static constexpr uint16_t BasebandCorePacketReception24DelayMs = 100;
+    static constexpr uint16_t TransceiverReadyDelayMs              = 100;
+    static constexpr uint16_t BasebandTx09DelayMs                  = 100;
+    static constexpr uint16_t BasebandTx24DelayMs                  = 100;
+    static constexpr uint16_t EnergyDetCompletion09DelayMs         = 100;
+    static constexpr uint16_t EnergyDetCompletion24DelayMs         = 100;
 
     struct RXConfig {
         // RFn_RXBWC
@@ -24,7 +50,7 @@ namespace AT86RF215 {
         EnergyDetectionMode energyDetectionMode09, energyDetectionMode24;
         uint8_t energyDetectDurationFactor09, energyDetectDurationFactor24;
         EnergyDetectionTimeBasis energyDetectionBasis09, energyDetectionBasis24;
-        static RXConfig DefaultRXConfig() {
+        static RXConfig defaultRXConfig() {
             return {
                     /// RFn_RXBWC
                     .receiverBandwidth09 = ReceiverBandwidth::RF_BW160KHZ_IF250KHZ,
@@ -127,7 +153,7 @@ namespace AT86RF215 {
     struct TXConfig {
         // RFn_TXDFE
         TxRelativeCutoffFrequency txRelativeCutoffFrequency09, txRelativeCutoffFrequency24;
-        Direct_Mod_Enable_FSKDM directModulation09, directModulation24;
+        DirectModEnableFSKDM directModulation09, directModulation24;
         TransmitterSampleRate transceiverSampleRate09, transceiverSampleRate24;
         // RFn_TXCUTC
         PowerAmplifierRampTime powerAmplifierRampTime09, powerAmplifierRampTime24;
@@ -135,14 +161,20 @@ namespace AT86RF215 {
         // RFn_PAC
         PowerAmplifierCurrentControl powerAmplifierCurrentControl09, powerAmplifierCurrentControl24;
         uint8_t txOutPower09, txOutPower24;
+        // RFn_TXDACI
+        bool enableInputI09, enableInputI24;
+        uint8_t dataInputI09, dataInputI24;
+        // RFn_TXDACQ
+        bool enableInputQ09, enableInputQ24;
+        uint8_t dataInputQ09, dataInputQ24;
 
         static TXConfig defaultTXConfig() {
             return {
                     // RFn_TXDFE
                     .txRelativeCutoffFrequency09 = TxRelativeCutoffFrequency::FCUT_0375,
                     .txRelativeCutoffFrequency24 = TxRelativeCutoffFrequency::FCUT_1,
-                    .directModulation09 = Direct_Mod_Enable_FSKDM::direct_mod_enabled,
-                    .directModulation24 = Direct_Mod_Enable_FSKDM::direct_mod_disabled,
+                    .directModulation09 = DirectModEnableFSKDM::direct_mod_enabled,
+                    .directModulation24 = DirectModEnableFSKDM::direct_mod_disabled,
                     .transceiverSampleRate09 = TransmitterSampleRate::FS_400,
                     .transceiverSampleRate24 = TransmitterSampleRate::FS_4000_3,
                     // RFn_TXCUTC
@@ -157,9 +189,20 @@ namespace AT86RF215 {
                     .powerAmplifierCurrentControl09 = PowerAmplifierCurrentControl::PA_NO,
                     .powerAmplifierCurrentControl24 = PowerAmplifierCurrentControl::PA_NO,
                     .txOutPower09 = 0x1F,
-                    .txOutPower24 = 0x00};
+                    .txOutPower24 = 0x00,
+                    // RFn_TXDACI
+                    .enableInputI09 = false,
+                    .enableInputI24 = false,
+                    .dataInputI09 = 0x7E, // maximum amplitude
+                    .dataInputI24 = 0x3F, // zero
+                    // RFn_TXDACQ
+                    .enableInputQ09 = false,
+                    .enableInputQ24 = false,
+                    .dataInputQ09 = 0x7E, // maximum amplitude
+                    .dataInputQ24 = 0x3F, // zero
+            };
         }
-        void setTxdfe(Transceiver transceiver, TxRelativeCutoffFrequency cutoffFrequency, Direct_Mod_Enable_FSKDM modulation, TransmitterSampleRate sampleRate) {
+        void setTxdfe(Transceiver transceiver, TxRelativeCutoffFrequency cutoffFrequency, DirectModEnableFSKDM modulation, TransmitterSampleRate sampleRate) {
             if (transceiver == Transceiver::RF09) {
                 txRelativeCutoffFrequency09 = cutoffFrequency;
                 directModulation09 = modulation;
@@ -191,6 +234,26 @@ namespace AT86RF215 {
                 txOutPower24 = outPower;
             }
         }
+        void setRfndaci(Transceiver transceiver, bool enableInputI, uint8_t dataInputI) {
+            if (transceiver == Transceiver::RF09) {
+                enableInputI09 = enableInputI;
+                dataInputI09 = dataInputI;
+            }
+            else {
+                enableInputI24 = enableInputI;
+                dataInputI24 = dataInputI;
+            }
+        }
+        void setRfndacq(Transceiver transceiver, bool enableInputQ, uint8_t dataInputQ) {
+            if (transceiver == Transceiver::RF09) {
+                enableInputQ09 = enableInputQ;
+                dataInputQ09 = dataInputQ;
+            }
+            else {
+                enableInputQ24 = enableInputQ;
+                dataInputQ24 = dataInputQ;
+            }
+        }
     };
 
     struct BasebandCoreConfig {
@@ -202,36 +265,36 @@ namespace AT86RF215 {
         bool baseBandEnable09, baseBandEnable24;
         PhysicalLayerType physicalLayerType09, physicalLayerType24;
         /// BBCn_FSKCO
-        Bandwidth_time_product bandwidth_time_09, bandwidth_time_24;
-        Mod_index_scale midxs_09, midxs_24;
-        Mod_index midx_09, midx_24;
-        FSK_mod_order mord_09, mord_24;
+        BandwidthTimeProduct bandwidth_time_09, bandwidth_time_24;
+        ModIndexScale midxs_09, midxs_24;
+        ModIndex midx_09, midx_24;
+        FskModOrder mord_09, mord_24;
         /// BBCn_FSKC1
-        Freq_Inversion freq_inv_09, freq_inv_24;
-        MR_FSK_symbol_rate sr_09, sr_24;
+        FreqInversion freq_inv_09, freq_inv_24;
+        MrFskSymbolRate sr_09, sr_24;
         /// BBCn_FSKC2
-        Preamble_Detection preamble_detection_09, preamble_detection_24;
-        Receiver_Override receiver_override_09, receiver_override_24;
-        Receiver_Preamble_Timeout receiver_preamble_timeout_09, receiver_preamble_timeout_24;
-        Mode_Switch_Enable mode_switch_en_09, mode_switch_en_24;
-        Preamble_Inversion preamble_inversion_09, preamble_inversion_24;
-        FEC_Scheme fec_scheme_09, fec_scheme_24;
-        Interleaving_Enable interleaving_enable_09, interleaving_enable_24;
+        PreambleDetection preamble_detection_09, preamble_detection_24;
+        ReceiverOverride receiver_override_09, receiver_override_24;
+        ReceiverPreambleTimeout receiver_preamble_timeout_09, receiver_preamble_timeout_24;
+        ModeSwitchEnable mode_switch_en_09, mode_switch_en_24;
+        PreambleInversion preamble_inversion_09, preamble_inversion_24;
+        FecScheme fec_scheme_09, fec_scheme_24;
+        InterleavingEnable interleaving_enable_09, interleaving_enable_24;
         /// BBCn_FSKC3
-        SFD_Detection_Threshold sfdt_09, sfdt_24;
-        Preamble_Detection_Threshold prdt_09, prdt_24;
+        SfdDetectionThreshold sfdt_09, sfdt_24;
+        PreambleDetectionThreshold prdt_09, prdt_24;
         /// BBCn_FSKC4
-        SFD_Quantization sfdQuantization_09, sfdQuantization_24;
-        SFD_32 sfd32_09, sfd32_24;
-        Raw_Mode_Reversal_Bit rawModeReversalBit_09, rawModeReversalBit_24;
+        SfdQuantization sfdQuantization_09, sfdQuantization_24;
+        Sfd32 sfd32_09, sfd32_24;
+        RawModeReversalBit rawModeReversalBit_09, rawModeReversalBit_24;
         CSFD1 csfd1_09, csfd1_24;
         CSFD0 csfd0_09, csfd0_24;
         /// BBCn_FSKPHRTX
-        SFD_Used sfdUsed_09, sfdUsed_24;
-        Data_Whitening dataWhitening_09, dataWhitening_24;
+        SfdUsed sfdUsed_09, sfdUsed_24;
+        DataWhitening dataWhitening_09, dataWhitening_24;
         /// BBCn_FSKDM
-        FSK_Preamphasis_Enable fskPreamphasisEnable_09, fskPreamphasisEnable_24;
-        Direct_Mod_Enable_FSKDM directModEnableFskdm_09, directModEnableFskdm_24;
+        FskPreamphasisEnable fskPreamphasisEnable_09, fskPreamphasisEnable_24;
+        DirectModEnableFSKDM directModEnableFskdm_09, directModEnableFskdm_24;
 
         static BasebandCoreConfig defaultBasebandCoreConfig() {
             return {
@@ -244,65 +307,65 @@ namespace AT86RF215 {
                     .transmitterAutoFrameCheckSequence24 = true,
                     .frameCheckSequenceType09 = FrameCheckSequenceType::FCS_32,
                     .frameCheckSequenceType24 = FrameCheckSequenceType::FCS_32,
-                    .baseBandEnable09 = true,
+                    .baseBandEnable09 = false,
                     .baseBandEnable24 = false,
                     .physicalLayerType09 = PhysicalLayerType::BB_MRFSK,
                     .physicalLayerType24 = PhysicalLayerType::BB_OFF,
                     /// BBCn_FSKC0
-                    .bandwidth_time_09 = Bandwidth_time_product::BT_1_0,
-                    .bandwidth_time_24 = Bandwidth_time_product::BT_2_0,
-                    .midxs_09 = Mod_index_scale::s_1_0,
-                    .midxs_24 = Mod_index_scale::s_1_0,
-                    .midx_09 = Mod_index::bf_1_000,
-                    .midx_24 = Mod_index::bf_1_000,
-                    .mord_09 = FSK_mod_order::binary_fsk,
-                    .mord_24 = FSK_mod_order::binary_fsk,
+                    .bandwidth_time_09 = BandwidthTimeProduct::BT_1_0,
+                    .bandwidth_time_24 = BandwidthTimeProduct::BT_2_0,
+                    .midxs_09 = ModIndexScale::s_1_0,
+                    .midxs_24 = ModIndexScale::s_1_0,
+                    .midx_09 = ModIndex::bf_1_000,
+                    .midx_24 = ModIndex::bf_1_000,
+                    .mord_09 = FskModOrder::binary_fsk,
+                    .mord_24 = FskModOrder::binary_fsk,
                     /// BBCn_FSKC1
-                    .freq_inv_09 = Freq_Inversion::freq_inversion_off,
-                    .freq_inv_24 = Freq_Inversion::freq_inversion_off,
-                    .sr_09 = MR_FSK_symbol_rate::sr_50,
-                    .sr_24 = MR_FSK_symbol_rate::sr_50,
+                    .freq_inv_09 = FreqInversion::freq_inversion_off,
+                    .freq_inv_24 = FreqInversion::freq_inversion_off,
+                    .sr_09 = MrFskSymbolRate::sr_50,
+                    .sr_24 = MrFskSymbolRate::sr_50,
                     /// BBCn_FSKC2
-                    .preamble_detection_09 = Preamble_Detection::preamble_det_without_rssi,
-                    .preamble_detection_24 = Preamble_Detection::preamble_det_without_rssi,
-                    .receiver_override_09 = Receiver_Override::restart_by_18db_stronger_frame,
-                    .receiver_override_24 = Receiver_Override::restart_by_18db_stronger_frame,
-                    .receiver_preamble_timeout_09 = Receiver_Preamble_Timeout::timeout_disabled,
-                    .receiver_preamble_timeout_24 = Receiver_Preamble_Timeout::timeout_disabled,
-                    .mode_switch_en_09 = Mode_Switch_Enable::disabled,
-                    .mode_switch_en_24 = Mode_Switch_Enable::disabled,
-                    .preamble_inversion_09 = Preamble_Inversion::no_inversion,
-                    .preamble_inversion_24 = Preamble_Inversion::no_inversion,
-                    .fec_scheme_09 = FEC_Scheme::NRNSC,
-                    .fec_scheme_24 = FEC_Scheme::NRNSC,
-                    .interleaving_enable_09 = Interleaving_Enable::enabled,
-                    .interleaving_enable_24 = Interleaving_Enable::enabled,
+                    .preamble_detection_09 = PreambleDetection::preamble_det_without_rssi,
+                    .preamble_detection_24 = PreambleDetection::preamble_det_without_rssi,
+                    .receiver_override_09 = ReceiverOverride::restart_by_18db_stronger_frame,
+                    .receiver_override_24 = ReceiverOverride::restart_by_18db_stronger_frame,
+                    .receiver_preamble_timeout_09 = ReceiverPreambleTimeout::timeout_disabled,
+                    .receiver_preamble_timeout_24 = ReceiverPreambleTimeout::timeout_disabled,
+                    .mode_switch_en_09 = ModeSwitchEnable::disabled,
+                    .mode_switch_en_24 = ModeSwitchEnable::disabled,
+                    .preamble_inversion_09 = PreambleInversion::no_inversion,
+                    .preamble_inversion_24 = PreambleInversion::no_inversion,
+                    .fec_scheme_09 = FecScheme::NRNSC,
+                    .fec_scheme_24 = FecScheme::NRNSC,
+                    .interleaving_enable_09 = InterleavingEnable::enabled,
+                    .interleaving_enable_24 = InterleavingEnable::enabled,
                     /// BBCn_FSKC3
-                    .sfdt_09 = SFD_Detection_Threshold::default_sfd_IEEE,
-                    .sfdt_24 = SFD_Detection_Threshold::default_sfd_IEEE,
-                    .prdt_09 = Preamble_Detection_Threshold::increased_preamble_sensitivity,
-                    .prdt_24 = Preamble_Detection_Threshold::default_value,
+                    .sfdt_09 = SfdDetectionThreshold::default_sfd_IEEE,
+                    .sfdt_24 = SfdDetectionThreshold::default_sfd_IEEE,
+                    .prdt_09 = PreambleDetectionThreshold::increased_preamble_sensitivity,
+                    .prdt_24 = PreambleDetectionThreshold::default_value,
                     /// BBCn_FSC4
-                    .sfdQuantization_09 = SFD_Quantization::SOFT_DECISION,
-                    .sfdQuantization_24 = SFD_Quantization::SOFT_DECISION,
-                    .sfd32_09 = SFD_32::TWO_16BIT_SFD,
-                    .sfd32_24 = SFD_32::TWO_16BIT_SFD,
-                    .rawModeReversalBit_09 = Raw_Mode_Reversal_Bit::MSB_FIRST,
-                    .rawModeReversalBit_24 = Raw_Mode_Reversal_Bit::MSB_FIRST,
+                    .sfdQuantization_09 = SfdQuantization::SOFT_DECISION,
+                    .sfdQuantization_24 = SfdQuantization::SOFT_DECISION,
+                    .sfd32_09 = Sfd32::TWO_16BIT_SFD,
+                    .sfd32_24 = Sfd32::TWO_16BIT_SFD,
+                    .rawModeReversalBit_09 = RawModeReversalBit::MSB_FIRST,
+                    .rawModeReversalBit_24 = RawModeReversalBit::MSB_FIRST,
                     .csfd1_09 = CSFD1::UNCODED_IEEE_MODE,
                     .csfd1_24 = CSFD1::UNCODED_IEEE_MODE,
                     .csfd0_09 = CSFD0::UNCODED_IEEE_MODE,
                     .csfd0_24 = CSFD0::UNCODED_IEEE_MODE,
                     /// BBCn_FSKPHRTX
-                    .sfdUsed_09 = SFD_Used::sfd0_used,
-                    .sfdUsed_24 = SFD_Used::sfd0_used,
-                    .dataWhitening_09 = Data_Whitening::psdu_data_whitening_disabled,
-                    .dataWhitening_24 = Data_Whitening::psdu_data_whitening_enabled,
+                    .sfdUsed_09 = SfdUsed::sfd0_used,
+                    .sfdUsed_24 = SfdUsed::sfd0_used,
+                    .dataWhitening_09 = DataWhitening::psdu_data_whitening_disabled,
+                    .dataWhitening_24 = DataWhitening::psdu_data_whitening_enabled,
                     /// BBCn_FSKDM
-                    .fskPreamphasisEnable_09 = FSK_Preamphasis_Enable::preamphasis_disabled,
-                    .fskPreamphasisEnable_24 = FSK_Preamphasis_Enable::preamphasis_disabled,
-                    .directModEnableFskdm_09 = Direct_Mod_Enable_FSKDM::direct_mod_enabled,
-                    .directModEnableFskdm_24 = Direct_Mod_Enable_FSKDM::direct_mod_disabled
+                    .fskPreamphasisEnable_09 = FskPreamphasisEnable::preamphasis_disabled,
+                    .fskPreamphasisEnable_24 = FskPreamphasisEnable::preamphasis_disabled,
+                    .directModEnableFskdm_09 = DirectModEnableFSKDM::direct_mod_enabled,
+                    .directModEnableFskdm_24 = DirectModEnableFSKDM::direct_mod_disabled
             };
         }
         /// BBC_PC
@@ -325,8 +388,8 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC0
-        void setBbcFskc0(Transceiver transceiver, Bandwidth_time_product bwTime, Mod_index_scale midxs,
-                          Mod_index midx, FSK_mod_order mord) {
+        void setBbcFskc0(Transceiver transceiver, BandwidthTimeProduct bwTime, ModIndexScale midxs,
+                          ModIndex midx, FskModOrder mord) {
             if (transceiver == Transceiver::RF09) {
                 bandwidth_time_09 = bwTime;
                 midxs_09 = midxs;
@@ -341,7 +404,7 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC1
-        void setBbcFskc1(Transceiver transceiver, Freq_Inversion freqInv, MR_FSK_symbol_rate sr) {
+        void setBbcFskc1(Transceiver transceiver, FreqInversion freqInv, MrFskSymbolRate sr) {
             if (transceiver == Transceiver::RF09) {
                 freq_inv_09 = freqInv;
                 sr_09 = sr;
@@ -352,10 +415,10 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC2
-        void setBbcFskc2(Transceiver transceiver, Preamble_Detection preambleDet, Receiver_Override recOverride,
-                          Receiver_Preamble_Timeout recPreambleTimeout, Mode_Switch_Enable modeSwitchEn,
-                          Preamble_Inversion preambleInv, FEC_Scheme fecScheme,
-                          Interleaving_Enable interleavingEn) {
+        void setBbcFskc2(Transceiver transceiver, PreambleDetection preambleDet, ReceiverOverride recOverride,
+                          ReceiverPreambleTimeout recPreambleTimeout, ModeSwitchEnable modeSwitchEn,
+                          PreambleInversion preambleInv, FecScheme fecScheme,
+                          InterleavingEnable interleavingEn) {
             if (transceiver == Transceiver::RF09) {
                 preamble_detection_09 = preambleDet;
                 receiver_override_09 = recOverride;
@@ -376,7 +439,7 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC3
-        void setBbcFskc3(Transceiver transceiver, SFD_Detection_Threshold sfdDetectionThreshold, Preamble_Detection_Threshold preambleDetectionThreshold) {
+        void setBbcFskc3(Transceiver transceiver, SfdDetectionThreshold sfdDetectionThreshold, PreambleDetectionThreshold preambleDetectionThreshold) {
             if (transceiver == Transceiver::RF09) {
                 sfdt_09 = sfdDetectionThreshold;
                 prdt_09 = preambleDetectionThreshold;
@@ -387,8 +450,8 @@ namespace AT86RF215 {
             }
         }
         /// BBC_FSKC4
-        void setBbcFskc4(Transceiver transceiver, SFD_Quantization sfdQuantization, SFD_32 sfd32,
-                          Raw_Mode_Reversal_Bit rawModeReversalBit,
+        void setBbcFskc4(Transceiver transceiver, SfdQuantization sfdQuantization, Sfd32 sfd32,
+                          RawModeReversalBit rawModeReversalBit,
                           CSFD1 csfd1, CSFD0 csfd2) {
             if (transceiver == Transceiver::RF09) {
                 sfdQuantization_09 = sfdQuantization;
@@ -406,7 +469,7 @@ namespace AT86RF215 {
             }
         }
         /// BBCn_FSKPHRTX
-        void setBbcFskphrtx(Transceiver transceiver, SFD_Used sfdused, Data_Whitening dataWhitening) {
+        void setBbcFskphrtx(Transceiver transceiver, SfdUsed sfdused, DataWhitening dataWhitening) {
             if (transceiver == Transceiver::RF09) {
                 sfdUsed_09 = sfdused;
                 dataWhitening_09 = dataWhitening;
@@ -417,7 +480,7 @@ namespace AT86RF215 {
             }
         }
         /// BBCn_FSKDM
-        void setBbcFskdm(Transceiver transceiver, FSK_Preamphasis_Enable fskPreamphasisEnable, Direct_Mod_Enable_FSKDM directModEnableFskdm) {
+        void setBbcFskdm(Transceiver transceiver, FskPreamphasisEnable fskPreamphasisEnable, DirectModEnableFSKDM directModEnableFskdm) {
             if (transceiver == Transceiver::RF09) {
                 fskPreamphasisEnable_09 = fskPreamphasisEnable;
                 directModEnableFskdm_09 = directModEnableFskdm;
@@ -569,7 +632,7 @@ namespace AT86RF215 {
                     .embeddedControlTX = EmbeddedControlTX::ENABLED,
                     // RF_IQIFC1
                     .chipMode = ChipMode::RF_MODE_BBRF,  // I/Q mode for both transceivers
-                    //.chipMode = ChipMode::RF_MODE_BBRF24, // baseband mode on sub GHz transceiver (debugging)
+                    // .chipMode = ChipMode::RF_MODE_BBRF24, // baseband mode on sub GHz transceiver (debugging)
                     .skewAlignment = SkewAlignment::SKEW3906NS};
         }
 

@@ -1,18 +1,22 @@
+/**
+ * @file at86rf215.hpp
+ *
+ * @brief This file contains the functions to interface with the transceiver.
+ */
+
 #pragma once
 
-#include <utility>
-#include <cstdint>
-#include "stm32h7xx_hal_spi.h"
+#include "stm32h7xx_hal.h"
 #include "etl/optional.h"
+#include "etl/delegate.h"
 #include "etl/span.h"
 #include "etl/expected.h"
 #include "FreeRTOS.h"
-#include "task.h"
 #include "semphr.h"
 #include "event_groups.h"
 #include "Logger.hpp"
-#include "at86rf215definitions.hpp"
-#include "at86rf215config.hpp"
+#include "at86rf215Definitions.hpp"
+#include "at86rf215Config.hpp"
 
 namespace AT86RF215 {
     struct IrqStatus {
@@ -21,13 +25,6 @@ namespace AT86RF215 {
         etl::optional<uint8_t> bbc0IrqsStatus;
         etl::optional<uint8_t> bbc1IrqsStatus;
     };
-
-    typedef struct {
-        uint8_t dotDashMapping;  // 0bXX represents the dot-dash mapping (e.g., 0b01 for dot-dash)
-        uint8_t dotDashNum;      // The number of symbols in the Morse code
-    } MorseCodeMapping;
-
-    static constexpr MorseCodeMapping getMorse(char c);
 
     enum class Error : uint8_t {
         FAILED_WRITING_TO_REGISTER,
@@ -51,41 +48,48 @@ namespace AT86RF215 {
         DESTINATION_BUFFER_TOO_SMALL,
         TX_BUFFER_TOO_LARGE,
         INVALID_REGISTER_VALUE,
-        BASEBAND_OPERATION_FUNCTION_FAILED
+        BASEBAND_OPERATION_FUNCTION_FAILED,
+        FAILED_DUE_TO_DESYNCHRONIZATION
     };
 
     inline uint8_t operator&(const uint8_t a, InterruptMask b) {
         return a & static_cast<uint8_t>(b);
     }
 
-    class At86rf215_Utilities {
+    typedef struct {
+        uint8_t dotDashMapping;  // 0bXX represents the dot-dash mapping (e.g., 0b01 for dot-dash)
+        uint8_t dotDashNum;      // The number of symbols in the Morse code
+    } MorseCodeMapping;
+
+    /**
+     * @brief This class contains methods for operating the transceiver, along with the necessary state variables
+     *        required for managing it.
+     */
+    class AT86RF215Chip {
     public:
-        /// Event group for signaling various events. Look in "at86rf215definitions" for interpretation
-        /// of each group bit
+        AT86RF215Chip() = default;
+
+        /**
+         * @brief Event group for signaling various events. Look in "at86rf215definitions" for interpretation
+         *        of each group bit
+         */
         EventGroupHandle_t eventGroupHandle;
-
-        /// Define here how long the transceiver should wait for certain events, before throwing an error (milliseconds).
-        static constexpr uint16_t SpiAccessMutexTimeoutMs            = 100;
-        static constexpr uint16_t SpiByteWriteCompleteDelayMs        = 100;
-        static constexpr uint16_t SpiByteReadCompleteDelayMs         = 100;
-        static constexpr uint16_t Radio09AccessMutexDelayMs          = 100;
-        static constexpr uint16_t Radio24AccessMutexDelayMs          = 100;
-        static constexpr uint16_t IqTxInterfaceAccessMutexDelayMs    = 100;
-        static constexpr uint16_t IqPacketReception09DelayMs         = 100;
-        static constexpr uint16_t IqPacketReception24DelayMs         = 100;
-        static constexpr uint16_t TransceiverReadyDelayMs            = 100;
-        static constexpr uint16_t BasebandTx09DelayMs                = 100;
-        static constexpr uint16_t BasebandTx24DelayMs                = 100;
-        static constexpr uint16_t EnergyDetCompletion09DelayMs       = 100;
-        static constexpr uint16_t EnergyDetCompletion24DelayMs       = 100;
-
-        At86rf215_Utilities() = default;
 
         /**
          * Initializer for AT86RF215 driver. This function must be called prior to performing
          * any operation with the transceiver.
          */
-        etl::expected<void, Error> initializeResources(SPI_HandleTypeDef* spiHandle);
+        etl::expected<void, Error> initializeResources(
+            SPI_HandleTypeDef* spi_handle,
+            GeneralConfiguration&& general_config = GeneralConfiguration::defaultGeneralConfig(),
+            RXConfig&& rx_config = RXConfig::defaultRXConfig(),
+            TXConfig&& tx_config = TXConfig::defaultTXConfig(),
+            BasebandCoreConfig&& baseband_core_config = BasebandCoreConfig::defaultBasebandCoreConfig(),
+            FrequencySynthesizerConfig&& frequency_synthesizer_config = FrequencySynthesizerConfig::defaultFrequencySynthesizerConfig(),
+            ExternalFrontEndConfig&& external_front_end_config = ExternalFrontEndConfig::defaultExternalFrontEndConfig(),
+            BasebandCoreInterruptsConfig&& baseband_core_interrupts_config = BasebandCoreInterruptsConfig::defaultBasebandCoreInterruptsConfig(),
+            RadioInterruptsConfig&& radio_interrupts_config = RadioInterruptsConfig::defaultRadioInterruptsConfig(),
+            IQInterfaceConfig&& iq_interface_config = IQInterfaceConfig::defaultIQInterfaceConfig());
 
         /**
          * This method reads the transceiver interrupt code and takes any necessary actions.
@@ -101,32 +105,32 @@ namespace AT86RF215 {
          * Update the configuration structures.
          * @warning For the changes to apply, a subsequent call to chipReset() is required.
          */
-        void setGeneralConfig(GeneralConfiguration&& GeneralConfig = GeneralConfiguration::defaultGeneralConfig()) {
-            generalConfig = std::move(GeneralConfig);
+        void setGeneralConfig(GeneralConfiguration&& GeneralConfig) {
+            generalConfig = GeneralConfig;
         }
-        void setRXConfig(RXConfig&& RXConfig = RXConfig::DefaultRXConfig()) {
-            rxConfig = std::move(RXConfig); // Move the new config into rxConfig
+        void setRXConfig(RXConfig&& RXConfig) {
+            rxConfig = RXConfig; // Move the new config into rxConfig
         }
-        void setTXConfig(TXConfig&& TXConfig = TXConfig::defaultTXConfig()) {
-            txConfig = std::move(TXConfig); // Move the new config into rxConfig
+        void setTXConfig(TXConfig&& TXConfig) {
+            txConfig = TXConfig; // Move the new config into rxConfig
         }
-        void setBaseBandCoreConfig(BasebandCoreConfig&& BasebandCoreConfig = BasebandCoreConfig::defaultBasebandCoreConfig()) {
-            basebandCoreConfig = std::move(BasebandCoreConfig); // Move the new config into rxConfig
+        void setBaseBandCoreConfig(BasebandCoreConfig&& BasebandCoreConfig) {
+            basebandCoreConfig = BasebandCoreConfig; // Move the new config into rxConfig
         }
-        void setFrequencySynthesizerConfig(FrequencySynthesizerConfig&& FrequencySynthesizer = FrequencySynthesizerConfig::defaultFrequencySynthesizerConfig()) {
-            freqSynthesizerConfig = std::move(FrequencySynthesizer); // Move the new config into rxConfig
+        void setFrequencySynthesizerConfig(FrequencySynthesizerConfig&& FrequencySynthesizer) {
+            freqSynthesizerConfig = FrequencySynthesizer; // Move the new config into rxConfig
         }
-        void setExternalFrontEndControlConfig(ExternalFrontEndConfig&& ExternalFrontEndConfig = ExternalFrontEndConfig::defaultExternalFrontEndConfig()) {
-            externalFrontEndConfig = std::move(ExternalFrontEndConfig);
+        void setExternalFrontEndControlConfig(ExternalFrontEndConfig&& ExternalFrontEndConfig) {
+            externalFrontEndConfig = ExternalFrontEndConfig;
         }
-        void setInterruptConfig(BasebandCoreInterruptsConfig&& InterruptsConfig = BasebandCoreInterruptsConfig::defaultBasebandCoreInterruptsConfig()) {
-            basebandCoreInterruptsConfig = std::move(InterruptsConfig);
+        void setBasebandInterruptConfig(BasebandCoreInterruptsConfig&& InterruptsConfig) {
+            basebandCoreInterruptsConfig = InterruptsConfig;
         }
-        void setRadioInterruptConfig(RadioInterruptsConfig&& RadioInterruptsConfig = RadioInterruptsConfig::defaultRadioInterruptsConfig()) {
-            radioInterruptsConfig = std::move(RadioInterruptsConfig);
+        void setRadioInterruptConfig(RadioInterruptsConfig&& RadioInterruptsConfig) {
+            radioInterruptsConfig = RadioInterruptsConfig;
         }
-        void setIQInterfaceConfig(IQInterfaceConfig&& IQInterfaceConfig = IQInterfaceConfig::defaultIQInterfaceConfig()) {
-            iqInterfaceConfig = std::move(IQInterfaceConfig);
+        void setIQInterfaceConfig(IQInterfaceConfig&& IQInterfaceConfig) {
+            iqInterfaceConfig = IQInterfaceConfig;
         }
 
         /**
@@ -148,7 +152,7 @@ namespace AT86RF215 {
 
         /**
          * Does chip reset and reads from the interrupt status registers via SPI, resetting them.
-         * It also restores the config settings
+         * It also restores the default config settings
          */
         etl::expected<void, Error> chipReset();
 
@@ -166,6 +170,14 @@ namespace AT86RF215 {
          * Print an error using the logger
          */
         static void printError(Error& err);
+
+        /**
+         * Set the chip to deep sleep mode, in order to minimize current consumption.
+         *
+         */
+        etl::expected<void, Error> setDeepSleep();
+
+        etl::expected<void, Error> wakeFromDeepSleep();
 
         /**
          * Single shot measurement of power in the specified bandwidth, around the
@@ -187,7 +199,7 @@ namespace AT86RF215 {
         etl::expected<void, Error> transmitCarrier(Transceiver transceiver, uint32_t transmissionTimeMs);
 
         /**
-         * Transmit a packet using the baseband core.
+         * Transmit a packet using the internal baseband core (basic mode, without embedded MAC functionality).
          *
          * @param transceiver		Specifies the transceiver used
          * @param packet			The packet data. The size must be smaller than the maximum packet length, which is
@@ -197,7 +209,7 @@ namespace AT86RF215 {
 
         /**
          * Set the receiver to a "listening" state, so that packet reception through the
-         * baseband core may be performed.
+         * baseband core may be performed (basic mode, without embedded MAC functionality).
          *
          * @note This function essentially sets the transceiver to state RX, but the user is
          *       not stopped from performing an energy measurement, or a tx operation (either with
@@ -240,8 +252,7 @@ namespace AT86RF215 {
          *       resource usage. Therefore, the driver has to know when the baseband processing is finished, so said
          *       resources are unlocked.
          */
-        template <typename BasebandOp>
-        etl::expected<void, Error> packetTransmissionIQEmbeddedControl(Transceiver transceiver, BasebandOp basebandOp);
+        etl::expected<void, Error> packetTransmissionIQEmbeddedControl(Transceiver transceiver, etl::delegate<bool()> basebandOp);
 
         /**
          * Set the transceiver to a "listening" state , so that packet reception through the
@@ -304,13 +315,35 @@ namespace AT86RF215 {
          * duration between characters: 3 time units
          * duration between words: 7 time units
          */
-        etl::expected<void, Error> transmitMorseCode(
+        etl::expected<void, Error> transmitMorseCodeOOK(
             Transceiver transceiver,
             float wpm,
             etl::string_view sequence);
 
+        /**
+         * Writes a byte to a specified address
+         *
+         * @param address	Specifies the address to write to
+         * @param value		The value to write to the specified address
+         *
+         * @warning This function is exposed publicly for debugging reasons. It does not offer concurrency protection
+         */
+        etl::expected<void, Error> spiWrite8(RegisterAddress address, uint8_t value);
+
+        /**
+         * Reads a byte to a specified address
+         *
+         * @param address	Specifies the address to read from
+         * @returns 		Returns the read byte
+         *
+         * @warning This function is exposed publicly for debugging reasons. It does not offer concurrency protection
+         */
+        etl::expected<uint8_t, Error> spiRead8(RegisterAddress address);
+
     private:
-        /// Mutex for protecting against concurrent access to spi and radio resources
+        /**
+         * Mutex for protecting against concurrent access to spi and radio resources
+         */
         StaticSemaphore_t spiAccessMutexBuffer = {};
         SemaphoreHandle_t spiAccessMutexHandle;
 
@@ -324,152 +357,18 @@ namespace AT86RF215 {
         SemaphoreHandle_t iqTxMutexHandle;
 
         /**
-         * Mutex locking utility following a RAII like pattern. To avoid deadlocks, the locking order must strictly
-         * be:
-         *
-         * - transceiver09MutexHandle
-         * - transceiver24MutexHandle
-         * - iqTxMutexHandle
-         * - spiAccessMutexHandle
-         *
-         * with unlocking order being the opposite.
-         *
-         * @note All lock functions return true if the mutexes are locked
-         * successfully. If false is returned, locking failed because of timeout or invalid lock order. The caller
-         * should always return if a lock fails, so the MutexGuard destructor is called to unlock any remaining
-         * mutexes.
+         * Event group for signaling various events
          */
-        class MutexGuard {
-        public:
-            MutexGuard(SemaphoreHandle_t spiAccessMutexHandle,
-                       SemaphoreHandle_t transceiver09MutexHandle,
-                       SemaphoreHandle_t transceiver24MutexHandle,
-                       SemaphoreHandle_t iqTxMutexHandle) :
-                spiAccessMutexHandle(spiAccessMutexHandle),
-                transceiver09MutexHandle(transceiver09MutexHandle),
-                transceiver24MutexHandle(transceiver24MutexHandle),
-                iqTxMutexHandle(iqTxMutexHandle) {}
-
-            MutexGuard(const MutexGuard&) = delete;
-            MutexGuard& operator=(const MutexGuard&) = delete;
-
-            bool lockSpi() {
-                if (ownsSpi) return false;
-
-                if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(SpiAccessMutexTimeoutMs)) == pdTRUE) {
-                    ownsSpi = true;
-                    return true;
-                }
-                return false;
-            }
-
-            void unlockSpi() {
-                if (ownsSpi) {
-                    xSemaphoreGive(spiAccessMutexHandle);
-                    ownsSpi = false;
-                }
-            }
-
-            bool lockIqTx() {
-                // Locking hierarchy: Cannot lock iqTx if we ALREADY own SPI
-                if (ownsIqTx || ownsSpi) return false;
-
-                if (xSemaphoreTake(iqTxMutexHandle, pdMS_TO_TICKS(IqTxInterfaceAccessMutexDelayMs)) == pdTRUE) {
-                    ownsIqTx = true;
-                    return true;
-                }
-                return false;
-            }
-
-            void unlockIqTx() {
-                if (ownsIqTx) {
-                    xSemaphoreGive(iqTxMutexHandle);
-                    ownsIqTx = false;
-                }
-            }
-
-            bool lockTransceiver(Transceiver transceiver) {
-                if (transceiver == Transceiver::RF09) {
-                    // Locking hierarchy: Cannot lock 09 if we ALREADY own 24, iqTx, or SPI
-                    if (ownsRf09 || ownsRf24 || ownsIqTx || ownsSpi) return false;
-
-                    if (xSemaphoreTake(transceiver09MutexHandle, pdMS_TO_TICKS(Radio09AccessMutexDelayMs)) == pdTRUE) {
-                        ownsRf09 = true;
-                        return true;
-                    }
-                } else if (transceiver == Transceiver::RF24) {
-                    // Locking hierarchy: Cannot lock 24 if we ALREADY own iqTx or SPI
-                    if (ownsRf24 || ownsIqTx || ownsSpi) return false;
-
-                    if (xSemaphoreTake(transceiver24MutexHandle, pdMS_TO_TICKS(Radio24AccessMutexDelayMs)) == pdTRUE) {
-                        ownsRf24 = true;
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            bool lockAll() {
-                // Prevent calling lockAll if we already hold anything
-                if (ownsSpi || ownsRf09 || ownsRf24 || ownsIqTx) {
-                    return false;
-                }
-
-                // Lock in strict top-down order
-                if (!lockTransceiver(Transceiver::RF09)) {
-                    return false;
-                }
-                if (!lockTransceiver(Transceiver::RF24)) {
-                    return false;
-                }
-                if (!lockIqTx()) {
-                    return false;
-                }
-                if (!lockSpi()) {
-                    return false;
-                }
-                return true;
-            }
-
-            ~MutexGuard() {
-                // unlock in reverse order
-                if (ownsSpi) {
-                    xSemaphoreGive(spiAccessMutexHandle);
-                    ownsSpi = false;
-                }
-                if (ownsIqTx) {
-                    xSemaphoreGive(iqTxMutexHandle);
-                    ownsIqTx = false;
-                }
-                if (ownsRf24) {
-                    xSemaphoreGive(transceiver24MutexHandle);
-                    ownsRf24 = false;
-                }
-                if (ownsRf09) {
-                    xSemaphoreGive(transceiver09MutexHandle);
-                    ownsRf09 = false;
-                }
-            }
-
-        private:
-            SemaphoreHandle_t spiAccessMutexHandle;
-            SemaphoreHandle_t transceiver09MutexHandle;
-            SemaphoreHandle_t transceiver24MutexHandle;
-            SemaphoreHandle_t iqTxMutexHandle;
-
-            bool ownsSpi = false;
-            bool ownsRf09 = false;
-            bool ownsRf24 = false;
-            bool ownsIqTx = false;
-        };
-
-        /// Event group for signaling various events
         StaticEventGroup_t eventGroupBuffer;
 
-        /// SPI handle
+        /**
+         * SPI handle
+         */
         SPI_HandleTypeDef* hspi;
 
-        /// Structs with register configurations
+        /**
+         * Structs with register configurations
+         */
         GeneralConfiguration generalConfig;
         RXConfig rxConfig;
         TXConfig txConfig;
@@ -480,29 +379,62 @@ namespace AT86RF215 {
         RadioInterruptsConfig radioInterruptsConfig;
         IQInterfaceConfig iqInterfaceConfig;
 
-        /// User provided memory for storing a received packet in baseband core operation
+        /**
+         * User provided memory for storing a received packet in baseband core operation
+         */
         etl::span<uint8_t> destBuffer09;
         etl::span<uint8_t> destBuffer24;
 
-        /// Received packet's length in baseband core operation
+        /**
+         * Received packet's length in baseband core operation
+         */
         uint16_t receivedPacketLength09;
         uint16_t receivedPacketLength24;
 
         /**
-         * Writes a byte to a specified address
+         * RAII like objects for mutex locking and mode setup management. Look at @file at86rf215GuardUtilities.hpp
          *
-         * @param address	Specifies the address to write to
-         * @param value		The value to write to the specified address
+         * @note The classes are declared here, so that they have access to all of AT86RF215Chip's state
          */
-        etl::expected<void, Error> spiWrite8(RegisterAddress address, uint8_t value);
+        class MutexGuard;
+        class DacOverrideSetup;
+        class SingleShotMeasurementSetup;
+        class IntBasebandCoreBasicModeSetup;
 
         /**
-         * Reads a byte to a specified address
-         *
-         * @param address	Specifies the address to read from
-         * @returns 		Returns the read byte
+         * If a frame reception begins with the baseband core, (ReceiverFrameStart interrupt arrives), handleIrq() sets
+         * the basebandCoreIsReceiving_n flag, and stores the start time in the basebandCoreReceptionStartTime_n
+         * variable. The mutex handler performs checks and refuses to lock a transceiver mutex, if a reception is taking
+         * place, unless of course the total amount of reception time has expired (which would indicate something went
+         * wrong with the reception. In that scenario, the basebandCoreIsReceiving_n flag is reset. Since the check
+         * of these variables is very fast, their access is protected with taskENTER_CRITICAL()
          */
-        etl::expected<uint8_t, Error> spiRead8(RegisterAddress address);
+        volatile bool basebandCoreIsReceiving09;
+        volatile TickType_t basebandCoreReceptionStartTime09;
+        volatile bool basebandCoreIsReceiving24;
+        volatile TickType_t basebandCoreReceptionStartTime24;
+
+        /**
+         * If the setup object destructors fail to revert the transceiver to the original configuration, then a
+         * desynchronization bit is raised. Every public function must call this synchronizeConfig() to fix the
+         * configuration if required.
+         *
+         * @returns Whether a synchronization was performed or not
+         */
+        etl::expected<bool, Error> synchronizeConfig() {
+            if ((xEventGroupGetBits(eventGroupHandle) & ConfigDesynchronizationGroupBit) != 0) {
+                if (auto status = chipReset(); !status.has_value()) {
+                    return etl::unexpected(status.error());
+                }
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * Return the morse code dot-dash mapping of a character
+         */
+        static constexpr MorseCodeMapping getMorse(char c);
 
         /**
          * Writes a byte to a specified address
@@ -536,6 +468,19 @@ namespace AT86RF215 {
          * @param mask		The mask to apply to the specified address
          */
         etl::expected<void, Error> spiApplyBitwiseAnd(RegisterAddress address, uint8_t mask);
+
+        /**
+         * Overwrite certain bits of the register
+         *
+         * @param address       Specifies the address to write to
+         * @param mask          The bits that will be overwritten
+         * @param overwriteBits The new bit values (only the ones where the bitmask has a bit equal to 1 will be applied)
+         * @return The original register value
+         */
+        etl::expected<uint8_t, Error> spiOverwriteBits(
+            RegisterAddress address,
+            uint8_t mask,
+            uint8_t overwriteBits);
 
         /**
          * Fetches the current state of the transceiver
@@ -882,7 +827,7 @@ namespace AT86RF215 {
             PowerAmplifierRampTime paRampTime,
             TransmitterCutOffFrequency cutoff,
             TxRelativeCutoffFrequency txRelCutoff,
-            Direct_Mod_Enable_FSKDM directMod,
+            DirectModEnableFSKDM directMod,
             TransmitterSampleRate txSampleRate,
             PowerAmplifierCurrentControl paCurrControl,
             uint8_t txOutPower,
@@ -1029,52 +974,56 @@ namespace AT86RF215 {
 
         etl::expected<void, Error> setBbcFskc0Config(
             Transceiver transceiver,
-            Bandwidth_time_product bt,
-            Mod_index_scale midxs,
-            Mod_index midx,
-            FSK_mod_order mord);
+            BandwidthTimeProduct bt,
+            ModIndexScale midxs,
+            ModIndex midx,
+            FskModOrder mord);
 
         etl::expected<void, Error> setBbcFskc1Config(
             Transceiver transceiver,
-            Freq_Inversion freqInv,
-            MR_FSK_symbol_rate sr);
+            FreqInversion freqInv,
+            MrFskSymbolRate sr);
 
         etl::expected<void, Error> setBbcFskc2Config(
             Transceiver transceiver,
-            Preamble_Detection preambleDet,
-            Receiver_Override recOverride,
-            Receiver_Preamble_Timeout recPreambleTimeout,
-            Mode_Switch_Enable modeSwitchEn,
-            Preamble_Inversion preambleInversion,
-            FEC_Scheme fec_sheme,
-            Interleaving_Enable interleavingEnable);
+            PreambleDetection preambleDet,
+            ReceiverOverride recOverride,
+            ReceiverPreambleTimeout recPreambleTimeout,
+            ModeSwitchEnable modeSwitchEn,
+            PreambleInversion preambleInversion,
+            FecScheme fec_sheme,
+            InterleavingEnable interleavingEnable);
             
         etl::expected<void, Error> setBbcFskc3Config(
             Transceiver transceiver,
-            SFD_Detection_Threshold sfdDetectionThreshold,
-            Preamble_Detection_Threshold preambleDetectionThreshold);
+            SfdDetectionThreshold sfdDetectionThreshold,
+            PreambleDetectionThreshold preambleDetectionThreshold);
                                   
         etl::expected<void, Error> setBbcFskc4Config(
             Transceiver transceiver,
-            SFD_Quantization sfdQuantization,
-            SFD_32 sfd32,
-            Raw_Mode_Reversal_Bit rawModeReversal,
+            SfdQuantization sfdQuantization,
+            Sfd32 sfd32,
+            RawModeReversalBit rawModeReversal,
             CSFD1 csfd1,
             CSFD0 csfd0);
 
         etl::expected<void, Error> setBbcFskphrtx(
             Transceiver transceiver,
-            SFD_Used sfdUsed,
-            Data_Whitening dataWhitening);
+            SfdUsed sfdUsed,
+            DataWhitening dataWhitening);
 
         etl::expected<void, Error> setBbcFskdm(
             Transceiver transceiver,
-            FSK_Preamphasis_Enable fskPreamphasisEnable,
-            Direct_Mod_Enable_FSKDM directModEnableFskdm);
+            FskPreamphasisEnable fskPreamphasisEnable,
+            DirectModEnableFSKDM directModEnableFskdm);
 
         etl::expected<void, Error> setExternalFrontEndControl(
             Transceiver transceiver,
             ExternalFrontEndControl frontEndControl);
+
+        etl::expected<void, Error> setTxDaci(Transceiver transceiver, bool inputEnable, uint8_t input);
+
+        etl::expected<void, Error> setTxDacq(Transceiver transceiver, bool inputEnable, uint8_t input);
 
         etl::expected<uint16_t, Error> getReceivedLength(Transceiver transceiver);
 
@@ -1085,6 +1034,5 @@ namespace AT86RF215 {
         etl::expected<void, Error> setup();
     };
 
-
-    extern At86rf215_Utilities transceiverUtils;
+    extern AT86RF215Chip at86rf215Chip;
 } // namespace AT86RF215
