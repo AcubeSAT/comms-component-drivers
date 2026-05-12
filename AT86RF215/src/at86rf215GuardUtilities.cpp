@@ -161,18 +161,28 @@ namespace AT86RF215 {
 
             // Any frame length will do. It's value does not need to be restored in the destructor, as
             // the length is supposed to be re-written every time
-            if (auto status = chip.spiWrite8(txfhlReg, 0x07); !status.has_value()) {
+            if (auto status = chip.spiWrite8(txfhlReg, 0x00); !status.has_value()) {
                 return etl::unexpected(status.error());
             }
 
-            if (auto status = chip.spiWrite8(txfllReg, 0xFF); !status.has_value()) {
+            if (auto status = chip.spiWrite8(txfllReg, 0x10); !status.has_value()) {
                 return etl::unexpected(status.error());
+            }
+
+            // Direct modulation must be disabled in order for the baseband core to have access to the I/Q DACs
+            if ((transceiver == Transceiver::RF09 && static_cast<bool>(chip.txConfig.directModulation09)) ||
+                (transceiver == Transceiver::RF24 && static_cast<bool>(chip.txConfig.directModulation24))) {
+                if (auto status = chip.spiOverwriteBits(txdfeReg, 0x10, 0x00); !status.has_value()) {
+                    return etl::unexpected(status.error());
+                } else {
+                    txdfeInitial = status.value();
+                }
             }
         } else {
             // Transmit using only the radio. EEC needs to be temporarily turned off, in order to
             // be able to control TXPREP-TX transitions manually
             if (chip.iqInterfaceConfig.embeddedControlTX == EmbeddedControlTX::ENABLED) {
-                if (auto status = chip.spiOverwriteBits(iqfc0Reg,  0x01, 0x01); !status.has_value()) {
+                if (auto status = chip.spiOverwriteBits(iqfc0Reg,  0x01, 0x00); !status.has_value()) {
                     return etl::unexpected(status.error());
                 } else {
                     iqfc0ValInitial = status.value();
@@ -200,20 +210,6 @@ namespace AT86RF215 {
                 } else {
                     txdacqInitial = status.value();
                 }
-        }
-
-
-        // get to state tx prep
-        uint32_t transceiverReadyGroupBit = transceiver == Transceiver::RF09 ? Transceiver09Ready : Transceiver24Ready;
-        xEventGroupClearBits(chip.eventGroupHandle, transceiverReadyGroupBit);
-
-        if (auto status = chip.setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
-            xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
-        }
-
-        if ((xEventGroupWaitBits(chip.eventGroupHandle, transceiverReadyGroupBit,
-        pdTRUE, pdFALSE, pdMS_TO_TICKS(TransceiverReadyDelayMs)) & transceiverReadyGroupBit) == false) {
-            return etl::unexpected(Error::FAILED_CHANGING_STATE);
         }
 
         return {};
@@ -258,6 +254,12 @@ namespace AT86RF215 {
                 xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
             }
         }
+
+        if (txdfeInitial.has_value()) {
+            if (auto status = chip.spiWrite8(txdfeReg, txdfeInitial.value()); !status.has_value()) {
+                xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
+            }
+        }
     }
 
     etl::expected<void, Error> AT86RF215Chip::SingleShotMeasurementSetup::setup() {
@@ -285,19 +287,6 @@ namespace AT86RF215 {
                     rxbwcInitial = status.value();
                 }
             }
-        }
-
-        // get to state tx prep
-        uint32_t transceiverReadyGroupBit = transceiver == Transceiver::RF09 ? Transceiver09Ready : Transceiver24Ready;
-        xEventGroupClearBits(chip.eventGroupHandle, transceiverReadyGroupBit);
-
-        if (auto status = chip.setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
-            xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
-        }
-
-        if ((xEventGroupWaitBits(chip.eventGroupHandle, transceiverReadyGroupBit,
-        pdTRUE, pdFALSE, pdMS_TO_TICKS(TransceiverReadyDelayMs)) & transceiverReadyGroupBit) == false) {
-            return etl::unexpected(Error::FAILED_CHANGING_STATE);
         }
 
         return {};
@@ -343,19 +332,6 @@ namespace AT86RF215 {
             } else {
                 pcInitial = status.value();
             }
-        }
-
-        // get to state tx prep
-        uint32_t transceiverReadyGroupBit = transceiver == Transceiver::RF09 ? Transceiver09Ready : Transceiver24Ready;
-        xEventGroupClearBits(chip.eventGroupHandle, transceiverReadyGroupBit);
-
-        if (auto status = chip.setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
-            xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
-        }
-
-        if ((xEventGroupWaitBits(chip.eventGroupHandle, transceiverReadyGroupBit,
-        pdTRUE, pdFALSE, pdMS_TO_TICKS(TransceiverReadyDelayMs)) & transceiverReadyGroupBit) == false) {
-            return etl::unexpected(Error::FAILED_CHANGING_STATE);
         }
 
         return {};

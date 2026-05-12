@@ -9,22 +9,27 @@
 
 namespace AT86RF215 {
     /// "External" event group bits. The user must trigger these events from the proper ISR or freertos task.
-    inline constexpr uint32_t SpiWriteCompleteGroupBit            = 1U << 0; // completion of spi write from dma callback
-    inline constexpr uint32_t SpiReadCompleteGroupBit             = 1U << 1; // completion of spi read from dma callback
-    inline constexpr uint32_t IqPreambleReception09GroupBit       = 1U << 2; // reception of a preamble using the I/Q interface
-    inline constexpr uint32_t IqPacketReception09GroupBit         = 1U << 3; // full reception of a packet using the I/Q interface
-    inline constexpr uint32_t IqPreambleReception24GroupBit       = 1U << 4; // reception of a preamble using the I/Q interface
-    inline constexpr uint32_t IqPacketReception24GroupBit         = 1U << 5; // full reception of a packet using the I/Q interface
+    enum class ExternalEventGroupBit : uint32_t {
+        IQ_PREAMBLE_RECEPTION_09 = 1U << 0, // reception of a preamble using the I/Q interface
+        IQ_PACKET_RECEPTION_09   = 1U << 1, // full reception of a packet using the I/Q interface
+        IQ_PREAMBLE_RECEPTION_24 = 1U << 2, // reception of a preamble using the I/Q interface
+        IQ_PACKET_RECEPTION_24   = 1U << 3, // full reception of a packet using the I/Q interface
+    };
 
-    /// "Internal" event group bits. Used for communication of certain driver functions with handleIrq()
-    inline constexpr uint32_t Transceiver09Ready              = 1U << 6; // signal about TXPREP interrupt
-    inline constexpr uint32_t Transceiver24Ready              = 1U << 7;
-    inline constexpr uint32_t BasebandTx09GroupBit            = 1U << 8; // signal finished transmission for sub GHz baseband core
-    inline constexpr uint32_t BasebandTx24GroupBit            = 1U << 9; // signal finished transmission for 2.4 baseband core
-    inline constexpr uint32_t BasebandRx09GroupBit            = 1U << 10; // signal finished reception for sub GHz baseband core
-    inline constexpr uint32_t BasebandRx24GroupBit            = 1U << 11; // signal finished reception for 2.4 GHz baseband core
-    inline constexpr uint32_t EnergyDetCompletion09GroupBit   = 1U << 12;
-    inline constexpr uint32_t EnergyDetCompletion24GroupBit   = 1U << 13;
+    /// Group bits that are set by the transceiver interrupt handling task (except the SPI read and write group bits,
+    /// set by the relevant spi interrupts)
+    enum class IrqEventGroupBit : uint32_t {
+        SPI_WRITE_COMPLETE           = 1U << 4,  // completion of spi write from dma callback
+        SPI_READ_COMPLETE            = 1U << 5,  // completion of spi read from dma callback
+        TRANSCEIVER_09_READY         = 1U << 6,  // signal about TXPREP interrupt
+        TRANSCEIVER_24_READY         = 1U << 7,
+        BASEBAND_TX_09_COMPLETE      = 1U << 8,  // signal finished transmission for sub GHz baseband core
+        BASEBAND_TX_24_COMPLETE      = 1U << 9,  // signal finished transmission for 2.4 baseband core
+        BASEBAND_RX_09_COMPLETE      = 1U << 10, // signal finished reception for sub GHz baseband core
+        BASEBAND_RX_24_COMPLETE      = 1U << 11, // signal finished reception for 2.4 GHz baseband core
+        ENERGY_DETECTION_09_COMPLETE = 1U << 12,
+        ENERGY_DETECTION_24_COMPLETE = 1U << 13,
+    };
 
     /**
      * If a setup class destructor fails to revert the chip's state back to the original one, then this

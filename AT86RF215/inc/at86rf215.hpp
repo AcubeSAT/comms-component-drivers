@@ -49,7 +49,8 @@ namespace AT86RF215 {
         TX_BUFFER_TOO_LARGE,
         INVALID_REGISTER_VALUE,
         BASEBAND_OPERATION_FUNCTION_FAILED,
-        FAILED_DUE_TO_DESYNCHRONIZATION
+        FAILED_DUE_TO_DESYNCHRONIZATION,
+        EVENT_WAIT_TIMEOUT,
     };
 
     inline uint8_t operator&(const uint8_t a, InterruptMask b) {
@@ -174,9 +175,16 @@ namespace AT86RF215 {
         /**
          * Set the chip to deep sleep mode, in order to minimize current consumption.
          *
+         * @note The register settings are lost when the transceiver is set to DEEP_SLEEP.
          */
         etl::expected<void, Error> setDeepSleep();
 
+        /**
+         * Wake the transceiver from deep sleep.
+         *
+         * @note This should be used as a debugging function. In nominal operations, the user
+         *       should call chip reset instead, in order to re-configure the transceiver settings
+         */
         etl::expected<void, Error> wakeFromDeepSleep();
 
         /**
@@ -413,6 +421,14 @@ namespace AT86RF215 {
         volatile TickType_t basebandCoreReceptionStartTime09;
         volatile bool basebandCoreIsReceiving24;
         volatile TickType_t basebandCoreReceptionStartTime24;
+
+        /**
+         * Yield the spi mutex and wait for the interrupt handling task to process and notify about an event
+         */
+        etl::expected<void, Error> waitForIrqEvent(
+            MutexGuard& mutexGuard,
+            IrqEventGroupBit irqEventGroupBit,
+            uint16_t waitDelayMs);
 
         /**
          * If the setup object destructors fail to revert the transceiver to the original configuration, then a

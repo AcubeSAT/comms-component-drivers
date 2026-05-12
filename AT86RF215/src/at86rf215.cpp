@@ -181,6 +181,18 @@ namespace AT86RF215 {
             return etl::unexpected(status.error());
         }
 
+        // get to state tx prep
+        if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+
+        const IrqEventGroupBit transceiverReadyGroupBit =
+            transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
+        if (auto status =
+            waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+
         // begin the single shot conversion
         bool bbcEnabled;
         RegisterAddress bbcPcReg;
@@ -200,26 +212,18 @@ namespace AT86RF215 {
             return etl::unexpected(status.error());
         }
 
-        // clear possibly stale bit
-        uint32_t energyDetectionCompletionGroupBit = transceiver == Transceiver::RF09 ? EnergyDetCompletion09GroupBit : EnergyDetCompletion24GroupBit;
-        xEventGroupClearBits(eventGroupHandle, energyDetectionCompletionGroupBit);
-
         if (auto status = spiWrite8(edcReg, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE)); !status.has_value()) {
             return etl::unexpected(status.error());
         }
 
         // wait for the one shot measurement to finish
-        mutexGuard.unlockSpi();
-        uint32_t energyDetectionCompletionGroupBitDelayMs = transceiver == Transceiver::RF09 ? EnergyDetCompletion09DelayMs : EnergyDetCompletion24DelayMs;
-        if ((xEventGroupWaitBits(eventGroupHandle,
-            energyDetectionCompletionGroupBit,
-            pdTRUE, pdFALSE,
-            pdMS_TO_TICKS(energyDetectionCompletionGroupBitDelayMs)) & energyDetectionCompletionGroupBit) == false) {
-            return etl::unexpected(Error::SINGLE_SHOT_ENERGY_MEASUREMENT_FAILED);
-        }
+        const IrqEventGroupBit energyDetectionCompletionGroupBit =
+            transceiver == Transceiver::RF09 ? IrqEventGroupBit::ENERGY_DETECTION_09_COMPLETE : IrqEventGroupBit::ENERGY_DETECTION_24_COMPLETE;
+        const uint32_t energyDetectionCompletionGroupBitDelayMs =
+            transceiver == Transceiver::RF09 ? EnergyDetCompletion09DelayMs : EnergyDetCompletion24DelayMs;
 
-        if (!mutexGuard.lockSpi()) {
-            return etl::unexpected(Error::MUTEX_LOCK_ERROR);
+        if (auto status = waitForIrqEvent(mutexGuard, energyDetectionCompletionGroupBit, energyDetectionCompletionGroupBitDelayMs); !status.has_value()) {
+            return etl::unexpected(status.error());
         }
 
         if (auto status = setStatePrivate(transceiver, State::RF_TRXOFF); !status.has_value()) {
@@ -242,11 +246,23 @@ namespace AT86RF215 {
 
         DacOverrideSetup dacOverrideSetup(*this, transceiver);
         if (auto status = dacOverrideSetup.setup(); !status.has_value()) {
-            return etl::unexpected(status.error());
+            return status;
+        }
+
+        // get to state tx prep
+        const IrqEventGroupBit transceiverReadyGroupBit =
+            transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
+
+        if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
+            return status;
+        }
+
+        if (auto status = waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
+            return status;
         }
 
         if (auto status = setStatePrivate(transceiver, State::RF_TX); !status.has_value()) {
-            return etl::unexpected(status.error());
+            return status;
         }
 
         mutexGuard.unlockSpi();
@@ -328,47 +344,32 @@ namespace AT86RF215 {
         }
 
         if (currState != State::RF_TXPREP) {
-            // clear possibly stale bit
-            uint32_t transceiverReadyGroupBit = transceiver == Transceiver::RF09 ? Transceiver09Ready : Transceiver24Ready;
-            xEventGroupClearBits(eventGroupHandle, transceiverReadyGroupBit);
-
             if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
                 return etl::unexpected(status.error());
             }
 
-            mutexGuard.unlockSpi();
-
-            if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
-            pdTRUE, pdFALSE, pdMS_TO_TICKS(TransceiverReadyDelayMs)) & transceiverReadyGroupBit) == false) {
-                return etl::unexpected(Error::FAILED_CHANGING_STATE);
+            const IrqEventGroupBit transceiverReadyGroupBit =
+                transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
+            if (auto status = waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
+                return status;
             }
-            if (!mutexGuard.lockSpi()) {
-                return etl::unexpected(Error::MUTEX_LOCK_ERROR);
-            }
-        }
-
-        if (auto status = setStatePrivate(transceiver, State::RF_TX); !status.has_value()) {
-            return etl::unexpected(status.error());
         }
 
         // start tx
-        // clear possibly stale bit
-        uint32_t basebandTxGroupBit = transceiver == Transceiver::RF09 ? BasebandTx09GroupBit : BasebandTx24GroupBit;
-        xEventGroupClearBits(eventGroupHandle, basebandTxGroupBit);
-
         if (auto status = setStatePrivate(transceiver, State::RF_TX); !status.has_value()) {
             return etl::unexpected(status.error());
         }
 
         // wait for the tx complete event, to ensure the operation
         // was completed
-        mutexGuard.unlockSpi();
-        uint32_t basebandTxGroupBitDelayMs = transceiver == Transceiver::RF09 ? BasebandTx09DelayMs : BasebandTx24DelayMs;
-        if ((xEventGroupWaitBits(eventGroupHandle,
-                                 basebandTxGroupBit,
-                                 pdTRUE, pdFALSE,
-                                 pdMS_TO_TICKS(basebandTxGroupBitDelayMs)) & basebandTxGroupBit) == false) {
-            return etl::unexpected(Error::TRANSMISSION_FAILED);
+        const uint32_t basebandTxGroupBitDelayMs =
+            transceiver == Transceiver::RF09 ? BasebandTx09DelayMs : BasebandTx24DelayMs;
+        const IrqEventGroupBit basebandTxGroupBit =
+            transceiver == Transceiver::RF09 ? IrqEventGroupBit::BASEBAND_TX_09_COMPLETE : IrqEventGroupBit::BASEBAND_TX_24_COMPLETE;
+
+        if (auto status =
+            waitForIrqEvent(mutexGuard, basebandTxGroupBit, basebandTxGroupBitDelayMs); !status.has_value()) {
+            return status;
         }
 
         return {};
@@ -403,6 +404,17 @@ namespace AT86RF215 {
             return status;
         }
 
+        // get to state tx prep
+        if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+
+        const IrqEventGroupBit transceiverReadyGroupBit =
+            transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
+        if (auto status = waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
+            return status;
+        }
+
         if (transceiver == Transceiver::RF09) {
             destBuffer09 = destBuff;
         } else {
@@ -410,13 +422,10 @@ namespace AT86RF215 {
         }
 
         // now set the state to rx
-        if (!mutexGuard.lockSpi()) {
-            return etl::unexpected(Error::MUTEX_LOCK_ERROR);
-        }
-
-        // clear possibly stale bit
-        uint32_t basebandRxGroupBit = transceiver == Transceiver::RF09 ?  BasebandRx09GroupBit : BasebandRx24GroupBit;
-        xEventGroupClearBits(eventGroupHandle, basebandRxGroupBit);
+        //   clear possibly stale bit
+        const IrqEventGroupBit basebandRxGroupBit =
+            transceiver == Transceiver::RF09 ?  IrqEventGroupBit::BASEBAND_RX_09_COMPLETE : IrqEventGroupBit::BASEBAND_RX_24_COMPLETE;
+        xEventGroupClearBits(eventGroupHandle, static_cast<uint32_t>(basebandRxGroupBit));
 
         if (auto status = setStatePrivate(transceiver, State::RF_RX); !status.has_value()) {
             return etl::unexpected(status.error());
@@ -445,7 +454,8 @@ namespace AT86RF215 {
         }
 
         // wait until a new packet is received (the actual packet copying is happening inside the interrupt)
-        uint32_t basebandRxGroupBit = transceiver == Transceiver::RF09 ? BasebandRx09GroupBit : BasebandRx24GroupBit;
+        const auto basebandRxGroupBit =
+            static_cast<uint32_t>(transceiver == Transceiver::RF09 ? IrqEventGroupBit::BASEBAND_RX_09_COMPLETE : IrqEventGroupBit::BASEBAND_RX_24_COMPLETE);
         if ((xEventGroupWaitBits(eventGroupHandle,
                basebandRxGroupBit,
                pdTRUE, pdFALSE,
@@ -489,27 +499,18 @@ namespace AT86RF215 {
         }
 
         if (currState != State::RF_TXPREP) {
-            // clear possibly stale bit
-            uint32_t transceiverReadyGroupBit = transceiver == Transceiver::RF09 ? Transceiver09Ready : Transceiver24Ready;
-            xEventGroupClearBits(eventGroupHandle, transceiverReadyGroupBit);
-
             if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
                 return etl::unexpected(status.error());
             }
 
-            // ensure the transceiver entered RF_TXPREP
-            mutexGuard.unlockSpi();
-            if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
-            pdTRUE, pdFALSE, pdMS_TO_TICKS(TransceiverReadyDelayMs)) & transceiverReadyGroupBit) == false) {
-                return etl::unexpected(Error::FAILED_CHANGING_STATE);
+            const IrqEventGroupBit transceiverReadyGroupBit =
+                transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
+            if (auto status = waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
+                return status;
             }
-
-            if (xSemaphoreTake(spiAccessMutexHandle, pdMS_TO_TICKS(SpiAccessMutexTimeoutMs)) != pdTRUE) {
-                return etl::unexpected(Error::MUTEX_LOCK_ERROR);
-            }
-        } else {
-            mutexGuard.unlockSpi();
         }
+
+        mutexGuard.unlockSpi();
 
         // Execute user's baseband operation (send packet to the I/Q interface of the transceiver)
         if (!basebandOp()) {
@@ -546,22 +547,14 @@ namespace AT86RF215 {
         }
 
         if (currState != State::RF_TXPREP) {
-            // clear possibly stale bit
-            uint32_t transceiverReadyGroupBit = transceiver == Transceiver::RF09 ? Transceiver09Ready : Transceiver24Ready;
-            xEventGroupClearBits(eventGroupHandle, transceiverReadyGroupBit);
-
             if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
                 return etl::unexpected(status.error());
             }
 
-            mutexGuard.unlockSpi();
-
-            if ((xEventGroupWaitBits(eventGroupHandle, transceiverReadyGroupBit,
-            pdTRUE, pdFALSE, pdMS_TO_TICKS(TransceiverReadyDelayMs)) & transceiverReadyGroupBit) == false) {
-                return etl::unexpected(Error::FAILED_CHANGING_STATE);
-            }
-            if (!mutexGuard.lockSpi()) {
-                return etl::unexpected(Error::MUTEX_LOCK_ERROR);
+            const IrqEventGroupBit transceiverReadyGroupBit =
+                transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
+            if (auto status = waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
+                return status;
             }
         }
 
@@ -571,8 +564,10 @@ namespace AT86RF215 {
         }
 
         // clear possibly stale bits
-        uint32_t iqPreambleReceptionGroupBit = transceiver == Transceiver::RF09 ? IqPreambleReception09GroupBit : IqPreambleReception24GroupBit;
-        uint32_t iqPacketReceptionGroupBit = transceiver == Transceiver::RF09 ? IqPacketReception09GroupBit : IqPacketReception24GroupBit;
+        const auto iqPreambleReceptionGroupBit =
+            static_cast<uint32_t>(transceiver == Transceiver::RF09 ? ExternalEventGroupBit::IQ_PREAMBLE_RECEPTION_09 : ExternalEventGroupBit::IQ_PREAMBLE_RECEPTION_24);
+        const auto iqPacketReceptionGroupBit =
+            static_cast<uint32_t>(transceiver == Transceiver::RF09 ? ExternalEventGroupBit::IQ_PACKET_RECEPTION_09 : ExternalEventGroupBit::IQ_PACKET_RECEPTION_24);
         xEventGroupClearBits(eventGroupHandle, iqPreambleReceptionGroupBit | iqPacketReceptionGroupBit);
 
         if (auto status = setStatePrivate(transceiver, State::RF_RX); !status.has_value()) {
@@ -600,8 +595,10 @@ namespace AT86RF215 {
         }
 
         // wait until a preamble is detected and lock the transceiver
-        uint32_t iqPreambleReceptionGroupBit = transceiver == Transceiver::RF09 ? IqPreambleReception09GroupBit : IqPreambleReception24GroupBit;
-        uint32_t iqPacketReceptionGroupBit = transceiver == Transceiver::RF09 ? IqPacketReception09GroupBit : IqPacketReception24GroupBit;
+        const auto iqPreambleReceptionGroupBit =
+             static_cast<uint32_t>(transceiver == Transceiver::RF09 ? ExternalEventGroupBit::IQ_PREAMBLE_RECEPTION_09 : ExternalEventGroupBit::IQ_PREAMBLE_RECEPTION_24);
+        const auto iqPacketReceptionGroupBit =
+            static_cast<uint32_t>(transceiver == Transceiver::RF09 ? ExternalEventGroupBit::IQ_PACKET_RECEPTION_09 : ExternalEventGroupBit::IQ_PACKET_RECEPTION_24);
 
         if ((xEventGroupWaitBits(eventGroupHandle,
                             iqPreambleReceptionGroupBit,
@@ -700,7 +697,17 @@ namespace AT86RF215 {
             return etl::unexpected(status.error());
         }
 
-        mutexGuard.unlockSpi();
+        // get to state tx prep
+        if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+
+        const IrqEventGroupBit transceiverReadyGroupBit =
+            transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
+        if (auto status = waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
+            return status;
+        }
+
         TickType_t lastWakeTimeTicks = xTaskGetTickCount();
         const TickType_t timeUnitTicks = pdMS_TO_TICKS(static_cast<uint16_t>(1200 / wpm));
         for (uint16_t i = 0; i < sequence.size(); i++) {
@@ -716,8 +723,10 @@ namespace AT86RF215 {
 
             // transmit character
             for (uint8_t j = 0; j < morseCodeMapping.dotDashNum; j++) {
-                if (!mutexGuard.lockSpi()) {
-                    return etl::unexpected(Error::MUTEX_LOCK_ERROR);
+                if (j != 0) {
+                    if (!mutexGuard.lockSpi()) {
+                        return etl::unexpected(Error::MUTEX_LOCK_ERROR);
+                    }
                 }
 
                 if (auto status = setStatePrivate(transceiver, State::RF_TX); !status.has_value()) {
@@ -754,8 +763,8 @@ namespace AT86RF215 {
             }
         }
 
-        // clean up transceiver ready event bit
-        xEventGroupClearBits(eventGroupHandle, transceiver == Transceiver::RF09 ? Transceiver09Ready : Transceiver24Ready);
+        // clean up possibly stale transceiver ready event bit
+        xEventGroupClearBits(eventGroupHandle, static_cast<uint32_t>(transceiverReadyGroupBit));
         return {};
     }
 
@@ -879,6 +888,9 @@ namespace AT86RF215 {
             case Error::FAILED_DUE_TO_DESYNCHRONIZATION:
                 LOG_ERROR << "FAILED_DUE_TO_DESYNCHRONIZATION";
                 break;
+            case Error::EVENT_WAIT_TIMEOUT:
+                LOG_ERROR << "EVENT_WAIT_TIMEOUT";
+                break;
             default:
                 LOG_ERROR << "UNHANDLED_ERROR";
                 break;
@@ -913,14 +925,12 @@ namespace AT86RF215 {
             return status;
         }
 
+        // The transceiver loses its settings while in deep sleep, so configuration in now de-synchronized
+        xEventGroupSetBits(eventGroupHandle, ConfigDesynchronizationGroupBit);
         return {};
     }
 
     etl::expected<void, Error> AT86RF215Chip::wakeFromDeepSleep() {
-        if (auto status = synchronizeConfig(); !status.has_value() ) {
-            return etl::unexpected(status.error());
-        }
-
         MutexGuard mutexGuard(*this);
         if (!mutexGuard.lockAll()) {
             return etl::unexpected(Error::MUTEX_LOCK_ERROR);
@@ -999,10 +1009,10 @@ namespace AT86RF215 {
             // Battery Low handling
         }
         if ((irqStatus.rf09IrqsStatus.value() & InterruptMask::EnergyDetectionCompletion) != 0) {
-            xEventGroupSetBits(eventGroupHandle, EnergyDetCompletion09GroupBit);
+            xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::ENERGY_DETECTION_09_COMPLETE));
         }
         if ((irqStatus.rf09IrqsStatus.value() & InterruptMask::TransceiverReady) != 0) {
-            xEventGroupSetBits(eventGroupHandle, Transceiver09Ready);
+            xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::TRANSCEIVER_09_READY));
         }
         if ((irqStatus.rf09IrqsStatus.value() & InterruptMask::Wakeup) != 0) {
             // Wakeup handling
@@ -1020,7 +1030,7 @@ namespace AT86RF215 {
         }
         if ((irqStatus.bbc0IrqsStatus.value() & InterruptMask::TransmitterFrameEnd) != 0) {
             // notify packetTransmissionBaseband() about successful transmission
-            xEventGroupSetBits(eventGroupHandle, BasebandTx09GroupBit);
+            xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::BASEBAND_TX_09_COMPLETE));
         }
         if ((irqStatus.bbc0IrqsStatus.value() & InterruptMask::ReceiverExtendMatch) != 0) {
             // Receiver Extended Match handling
@@ -1029,7 +1039,7 @@ namespace AT86RF215 {
             // Receiver Address Match handling
         }
         if ((irqStatus.bbc0IrqsStatus.value() & InterruptMask::ReceiverFrameStart) != 0) {
-            // reception started of frame started, do not allow the respective radio to be locked
+            // reception of frame started, do not allow the respective radio to be locked
             taskENTER_CRITICAL();
             basebandCoreIsReceiving09 = true;
             basebandCoreReceptionStartTime09 = xTaskGetTickCount();
@@ -1057,7 +1067,7 @@ namespace AT86RF215 {
             taskEXIT_CRITICAL();
 
             // notify waitForPacketReceptionBaseband()
-            xEventGroupSetBits(eventGroupHandle, BasebandRx09GroupBit);
+            xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::BASEBAND_RX_09_COMPLETE));
         }
 
         /* 2.4 GHz Transceiver */
@@ -1073,10 +1083,10 @@ namespace AT86RF215 {
             // Battery Low handling
         }
         if ((irqStatus.rf24IrqsStatus.value() & InterruptMask::EnergyDetectionCompletion) != 0) {
-            xEventGroupSetBits(eventGroupHandle, EnergyDetCompletion24GroupBit);
+            xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::ENERGY_DETECTION_24_COMPLETE));
         }
         if ((irqStatus.rf24IrqsStatus.value() & InterruptMask::TransceiverReady) != 0) {
-            xEventGroupSetBits(eventGroupHandle, Transceiver24Ready);
+            xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::TRANSCEIVER_24_READY));
         }
         if ((irqStatus.rf24IrqsStatus.value() & InterruptMask::Wakeup) != 0) {
             // Wakeup handling
@@ -1093,7 +1103,7 @@ namespace AT86RF215 {
         }
         if ((irqStatus.bbc1IrqsStatus.value() & InterruptMask::TransmitterFrameEnd) != 0) {
             // notify packetTransmissionBaseband() about successful transmission
-            xEventGroupSetBits(eventGroupHandle, BasebandTx24GroupBit);
+            xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::BASEBAND_TX_24_COMPLETE));
         }
         if ((irqStatus.bbc1IrqsStatus.value() & InterruptMask::ReceiverExtendMatch) != 0) {
             // Receiver Extended Match handling
@@ -1130,13 +1140,38 @@ namespace AT86RF215 {
             taskEXIT_CRITICAL();
 
             // notify waitForPacketReceptionBaseband()
-            xEventGroupSetBits(eventGroupHandle, BasebandRx24GroupBit);
+            xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::BASEBAND_RX_24_COMPLETE));
         }
 
         return irqStatus;
     }
 
     /** =========== Private functions  =========== **/
+    etl::expected<void, Error> AT86RF215Chip::waitForIrqEvent(
+        MutexGuard& mutexGuard,
+        IrqEventGroupBit irqEventGroupBit,
+        uint16_t waitDelayMs) {
+
+        const auto eventGroupBit = static_cast<uint32_t>(irqEventGroupBit);
+
+        // clear possibly stale bit
+        xEventGroupClearBits(eventGroupHandle, eventGroupBit);
+
+        // release spi so that the interrupt handling task can read the irq registers
+        mutexGuard.unlockSpi();
+
+        if ((xEventGroupWaitBits(eventGroupHandle, eventGroupBit,
+        pdTRUE, pdFALSE, pdMS_TO_TICKS(waitDelayMs)) & eventGroupBit) == false) {
+            return etl::unexpected(Error::EVENT_WAIT_TIMEOUT);
+        }
+
+        if (!mutexGuard.lockSpi()) {
+            return etl::unexpected(Error::MUTEX_LOCK_ERROR);
+        }
+
+        return {};
+    }
+
     constexpr MorseCodeMapping AT86RF215Chip::getMorse(char c) {
         // . == 0 , - == 1 encoding starts from MSB
         switch (c) {
@@ -1248,7 +1283,8 @@ namespace AT86RF215 {
         }
 
         // clear possibly stale bit
-        xEventGroupClearBits(eventGroupHandle, SpiWriteCompleteGroupBit);
+        constexpr auto spiWriteCompleteGroupBit = static_cast<uint32_t>(IrqEventGroupBit::SPI_WRITE_COMPLETE);
+        xEventGroupClearBits(eventGroupHandle, spiWriteCompleteGroupBit);
 
         if (HAL_SPI_Transmit_DMA(hspi, value.data(), value.size()) != HAL_OK) {
             HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
@@ -1256,11 +1292,12 @@ namespace AT86RF215 {
         }
 
         EventBits_t eventBits = xEventGroupWaitBits(eventGroupHandle,
-                            SpiWriteCompleteGroupBit,
+                            spiWriteCompleteGroupBit,
                             pdTRUE, pdTRUE,
                             pdMS_TO_TICKS(value.size() * static_cast<uint32_t>(SpiByteWriteCompleteDelayMs)));
-        if (!(eventBits & SpiWriteCompleteGroupBit)) {
+        if (!(eventBits & spiWriteCompleteGroupBit)) {
             HAL_SPI_Abort(hspi);
+            xEventGroupClearBits(eventGroupHandle, spiWriteCompleteGroupBit);
             HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             return etl::unexpected(Error::FAILED_WRITING_TO_REGISTER);
         }
@@ -1282,7 +1319,9 @@ namespace AT86RF215 {
         }
 
         // clear possibly stale bit
-        xEventGroupClearBits(eventGroupHandle, SpiWriteCompleteGroupBit | SpiReadCompleteGroupBit);
+        constexpr auto spiWriteCompleteGroupBit = static_cast<uint32_t>(IrqEventGroupBit::SPI_WRITE_COMPLETE);
+        constexpr auto spiReadCompleteGroupBit = static_cast<uint32_t>(IrqEventGroupBit::SPI_READ_COMPLETE);
+        xEventGroupClearBits(eventGroupHandle, spiWriteCompleteGroupBit | spiReadCompleteGroupBit);
 
         if (HAL_SPI_Receive_DMA(hspi, response.data(), response.size()) != HAL_OK) {
             HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
@@ -1290,12 +1329,13 @@ namespace AT86RF215 {
         }
 
         EventBits_t eventBits = xEventGroupWaitBits(eventGroupHandle,
-                            SpiReadCompleteGroupBit,
+                            spiReadCompleteGroupBit,
                             pdTRUE, pdTRUE,
                             pdMS_TO_TICKS(response.size() * static_cast<uint32_t>(SpiByteReadCompleteDelayMs)));
 
-        if (!(eventBits & SpiReadCompleteGroupBit)) {
+        if (!(eventBits & spiReadCompleteGroupBit)) {
             HAL_SPI_Abort(hspi);
+            xEventGroupClearBits(eventGroupHandle, spiWriteCompleteGroupBit | spiReadCompleteGroupBit);
             HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
             return etl::unexpected(Error::FAILED_READING_FROM_REGISTER);
         }
@@ -1397,8 +1437,8 @@ namespace AT86RF215 {
                 return etl::unexpected(Error::UKNOWN_REQUESTED_STATE);
         }
 
-        RegisterAddress stateReg = transceiver == Transceiver::RF09 ? RegisterAddress::RF09_STATE : RegisterAddress::RF24_STATE;
-        if (auto status = spiWrite8(stateReg, static_cast<uint8_t>(stateCmd)); !status.has_value()) {
+        RegisterAddress cmdReg = transceiver == Transceiver::RF09 ? RegisterAddress::RF09_CMD : RegisterAddress::RF24_CMD;
+        if (auto status = spiWrite8(cmdReg, static_cast<uint8_t>(stateCmd)); !status.has_value()) {
             return status;
         }
 

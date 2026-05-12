@@ -86,12 +86,14 @@ namespace AT86RF215 {
                 txfllReg = RegisterAddress::BBC0_TXFLL;
                 txdaciReg = RegisterAddress::RF09_TXDACI;
                 txdacqReg = RegisterAddress::RF09_TXDACQ;
+                txdfeReg = RegisterAddress::RF09_TXDFE;
             } else {
                 pcReg = RegisterAddress::BBC1_PC;
                 txfhlReg = RegisterAddress::BBC1_TXFLH;
                 txfllReg = RegisterAddress::BBC1_TXFLL;
                 txdaciReg = RegisterAddress::RF24_TXDACI;
                 txdacqReg = RegisterAddress::RF24_TXDACQ;
+                txdfeReg = RegisterAddress::RF24_TXDFE;
             }
         }
 
@@ -110,11 +112,13 @@ namespace AT86RF215 {
         RegisterAddress txfllReg;
         RegisterAddress txdaciReg;
         RegisterAddress txdacqReg;
+        RegisterAddress txdfeReg;
 
         etl::optional<uint8_t> iqfc0ValInitial;
         etl::optional<uint8_t> pcValInitial;
         etl::optional<uint8_t> txdaciInitial;
         etl::optional<uint8_t> txdacqInitial;
+        etl::optional<uint8_t> txdfeInitial;
     };
 
     /**
