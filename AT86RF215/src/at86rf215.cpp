@@ -1966,6 +1966,20 @@ namespace AT86RF215 {
         }
     }
 
+    etl::expected<void, Error> AT86RF215Chip::setFskPreambleLength(Transceiver transceiver, uint16_t preambleLength) {
+        RegisterAddress regFskpll = transceiver == Transceiver::RF09 ? RegisterAddress::BBC0_FSKPLL : RegisterAddress::BBC1_FSKPLL;
+        RegisterAddress regFskc1 = transceiver == Transceiver::RF09 ? RegisterAddress::BBC0_FSKC1 : RegisterAddress::BBC1_FSKC1;
+
+        if (auto status = spiWrite8(regFskpll, static_cast<uint8_t>(preambleLength)); !status.has_value()) {
+            return status;
+        }
+
+        if (auto status = spiOverwriteBits(regFskc1, 0xC0, preambleLength >> 2); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+        return {};
+    }
+
     etl::expected<void, Error> AT86RF215Chip::setExternalFrontEndControl(Transceiver transceiver,
         ExternalFrontEndControl frontEndControl) {
         RegisterAddress regAddress = transceiver == Transceiver::RF09 ? RegisterAddress::RF09_PADFE : RegisterAddress::RF24_PADFE;
@@ -2374,6 +2388,15 @@ namespace AT86RF215 {
         }
 
         if (auto status = setBbcFskdm(Transceiver::RF24, basebandCoreConfig.fskPreamphasisEnable_24, basebandCoreConfig.directModEnableFskdm_24); !status.has_value()) {
+            return status;
+        }
+
+        /// FSK Preamble Length
+        if (auto status = setFskPreambleLength(Transceiver::RF09, basebandCoreConfig.fskPreambleLengthOctets_09); !status.has_value()) {
+            return status;
+        }
+
+        if (auto status = setFskPreambleLength(Transceiver::RF24, basebandCoreConfig.fskPreambleLengthOctets_24); !status.has_value()) {
             return status;
         }
 

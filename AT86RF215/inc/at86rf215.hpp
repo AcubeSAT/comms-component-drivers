@@ -1033,6 +1033,8 @@ namespace AT86RF215 {
             FskPreamphasisEnable fskPreamphasisEnable,
             DirectModEnableFSKDM directModEnableFskdm);
 
+        etl::expected<void, Error> setFskPreambleLength(Transceiver transceiver, uint16_t preambleLength);
+
         etl::expected<void, Error> setExternalFrontEndControl(
             Transceiver transceiver,
             ExternalFrontEndControl frontEndControl);

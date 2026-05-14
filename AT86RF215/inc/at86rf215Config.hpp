@@ -295,6 +295,8 @@ namespace AT86RF215 {
         /// BBCn_FSKDM
         FskPreamphasisEnable fskPreamphasisEnable_09, fskPreamphasisEnable_24;
         DirectModEnableFSKDM directModEnableFskdm_09, directModEnableFskdm_24;
+        /// BBCn_FSKPLL
+        uint16_t fskPreambleLengthOctets_09, fskPreambleLengthOctets_24;
 
         static BasebandCoreConfig defaultBasebandCoreConfig() {
             return {
@@ -365,7 +367,10 @@ namespace AT86RF215 {
                     .fskPreamphasisEnable_09 = FskPreamphasisEnable::preamphasis_disabled,
                     .fskPreamphasisEnable_24 = FskPreamphasisEnable::preamphasis_disabled,
                     .directModEnableFskdm_09 = DirectModEnableFSKDM::direct_mod_enabled,
-                    .directModEnableFskdm_24 = DirectModEnableFSKDM::direct_mod_disabled
+                    .directModEnableFskdm_24 = DirectModEnableFSKDM::direct_mod_disabled,
+                    /// BBCn_FSKPLL
+                    .fskPreambleLengthOctets_09 = 8,
+                    .fskPreambleLengthOctets_24 = 8,
             };
         }
         /// BBC_PC
