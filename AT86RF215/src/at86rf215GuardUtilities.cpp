@@ -219,7 +219,7 @@ namespace AT86RF215 {
         // There are occasions where the api functions unlock the SPI mutex during lengthy processes, so
         // that the transceiver is not locked down. If said function experiences an error and needs to
         // return before relocking the SPI mutex, it is not safe for this destructor to use SPI.
-        if (xSemaphoreGetMutexHolder(chip.spiAccessMutexHandle) == xTaskGetCurrentTaskHandle()) {
+        if (xSemaphoreGetMutexHolder(chip.spiAccessMutexHandle) != xTaskGetCurrentTaskHandle()) {
             xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
             return;
         }
@@ -296,7 +296,7 @@ namespace AT86RF215 {
         // There are occasions where the api functions unlock the SPI mutex during lengthy processes, so
         // that the transceiver is not locked down. If said function experiences an error and needs to
         // return before relocking the SPI mutex, it is not safe for this destructor to use SPI.
-        if (xSemaphoreGetMutexHolder(chip.spiAccessMutexHandle) == xTaskGetCurrentTaskHandle()) {
+        if (xSemaphoreGetMutexHolder(chip.spiAccessMutexHandle) != xTaskGetCurrentTaskHandle()) {
             xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
             return;
         }
@@ -314,44 +314,6 @@ namespace AT86RF215 {
 
         if (rxbwcInitial.has_value()) {
             if (auto status = chip.spiWrite8(rxbwcReg, rxbwcInitial.value()); !status.has_value()) {
-                xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
-            }
-        }
-    }
-
-    etl::expected<void, Error> AT86RF215Chip::IntBasebandCoreBasicModeSetup::setup() {
-        if (auto status = chip.setStatePrivate(transceiver, State::RF_TRXOFF); !status.has_value()) {
-            xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
-        }
-
-        if ((transceiver == Transceiver::RF09 && !chip.basebandCoreConfig.baseBandEnable09) ||
-            (transceiver == Transceiver::RF24 && !chip.basebandCoreConfig.baseBandEnable24)) {
-            if (auto status =
-                chip.spiOverwriteBits(pcReg, 0x04, 0x04); !status.has_value()) {
-                return etl::unexpected(status.error());
-            } else {
-                pcInitial = status.value();
-            }
-        }
-
-        return {};
-    }
-
-    AT86RF215Chip::IntBasebandCoreBasicModeSetup::~IntBasebandCoreBasicModeSetup() {
-        // There are occasions where the api functions unlock the SPI mutex during lengthy processes, so
-        // that the transceiver is not locked down. If said function experiences an error and needs to
-        // return before relocking the SPI mutex, it is not safe for this destructor to use SPI.
-        if (xSemaphoreGetMutexHolder(chip.spiAccessMutexHandle) == xTaskGetCurrentTaskHandle()) {
-            xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
-            return;
-        }
-
-        if (auto status = chip.setStatePrivate(transceiver, State::RF_TRXOFF); !status.has_value()) {
-            xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
-        }
-
-        if (pcInitial.has_value()) {
-            if (auto status = chip.spiWrite8(pcReg, pcInitial.value()); !status.has_value()) {
                 xEventGroupSetBits(chip.eventGroupHandle, ConfigDesynchronizationGroupBit);
             }
         }

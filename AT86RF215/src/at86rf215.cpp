@@ -212,6 +212,11 @@ namespace AT86RF215 {
             return etl::unexpected(status.error());
         }
 
+        // According to Table 6-13, certain time has to elapse until the first RSSI value is available, ranging in the
+        // order to a few tens to a few hundreds of us, depending on AGCC.AVGS and RXDFE.SR. A waiting time of 1ms
+        // guarantees the energy detection to be accurate for any setting
+        vTaskDelay(pdMS_TO_TICKS(1));
+
         if (auto status = spiWrite8(edcReg, static_cast<uint8_t>(EnergyDetectionMode::RF_EDSINGLE)); !status.has_value()) {
             return etl::unexpected(status.error());
         }
@@ -294,7 +299,7 @@ namespace AT86RF215 {
         // ensure the baseband core is active
         if ((transceiver == Transceiver::RF09 && !basebandCoreConfig.baseBandEnable09) ||
             (transceiver == Transceiver::RF24 && !basebandCoreConfig.baseBandEnable24)) {
-            return etl::unexpected(Error::INVALID_CHIP_MODE);
+            return etl::unexpected(Error::BASEBAND_CORE_DISABLED);
         }
 
         MutexGuard mutexGuard(*this);
@@ -316,10 +321,6 @@ namespace AT86RF215 {
             regtxfll = RegisterAddress::BBC1_TXFLL;
             regfbtxs = RegisterAddress::BBC1_FBTXS;
         }
-
-        // if (auto status = setStatePrivate(transceiver, State::RF_TRXOFF); !status.has_value()) {
-        //     return etl::unexpected(status.error());
-        // }
 
         // write length to register
         if (auto status = spiWrite8(regtxfll, packet.size() & 0xFF); !status.has_value()) {
@@ -386,11 +387,16 @@ namespace AT86RF215 {
             return etl::unexpected(Error::DESTINATION_BUFFER_TOO_SMALL);
         }
 
-        // ensure valid chip mode
+        // ensure valid chip mode and that baseband core is enabled
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF ||                                              // no bb core is active
             (transceiver == Transceiver::RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ||    // 09 bb core is inactive
             (transceiver == Transceiver::RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ) {   // 24 bb core is inactive
             return etl::unexpected(Error::INVALID_CHIP_MODE);
+        }
+
+        if ((transceiver == Transceiver::RF09 && !basebandCoreConfig.baseBandEnable09) ||
+            (transceiver == Transceiver::RF24 && !basebandCoreConfig.baseBandEnable24)) {
+            return etl::unexpected(Error::BASEBAND_CORE_DISABLED);
         }
 
         MutexGuard mutexGuard(*this);
@@ -399,20 +405,24 @@ namespace AT86RF215 {
             return etl::unexpected(Error::MUTEX_LOCK_ERROR);
         }
 
-        IntBasebandCoreBasicModeSetup intBasebandCoreBasicModeSetup(*this, transceiver);
-        if (auto status = intBasebandCoreBasicModeSetup.setup(); !status.has_value()) {
-            return status;
-        }
-
-        // get to state tx prep
-        if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
+        // wait for the transceiver to enter RF_TXPREP (if it is not already in it)
+        State currState;
+        if (auto status = getStatePrivate(transceiver); !status.has_value()) {
             return etl::unexpected(status.error());
+        } else {
+            currState = status.value();
         }
 
-        const IrqEventGroupBit transceiverReadyGroupBit =
-            transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
-        if (auto status = waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
-            return status;
+        if (currState != State::RF_TXPREP) {
+            if (auto status = setStatePrivate(transceiver, State::RF_TXPREP); !status.has_value()) {
+                return etl::unexpected(status.error());
+            }
+
+            const IrqEventGroupBit transceiverReadyGroupBit =
+                transceiver == Transceiver::RF09 ? IrqEventGroupBit::TRANSCEIVER_09_READY : IrqEventGroupBit::TRANSCEIVER_24_READY;
+            if (auto status = waitForIrqEvent(mutexGuard, transceiverReadyGroupBit, TransceiverReadyDelayMs); !status.has_value()) {
+                return status;
+            }
         }
 
         if (transceiver == Transceiver::RF09) {
@@ -434,23 +444,28 @@ namespace AT86RF215 {
         return {};
     }
 
-    etl::expected<uint16_t, Error> AT86RF215Chip::waitForPacketReceptionBaseband(
+    etl::expected<etl::pair<uint16_t, uint8_t>, Error> AT86RF215Chip::waitForPacketReceptionBaseband(
         Transceiver transceiver,
         uint32_t timeoutDelayMs) {
         if (auto status = synchronizeConfig(); !status.has_value() ) {
             return etl::unexpected(status.error());
         } else {
-            // The respective transceiver needs to be prepared again  if a synchronization was performed
+            // The respective transceiver needs to be prepared again if a synchronization was performed
             if (status.value() == true) {
                 return etl::unexpected(Error::FAILED_DUE_TO_DESYNCHRONIZATION);
             }
         }
 
-        // ensure valid chip mode
+        // ensure valid chip mode and that the baseband core is enabled
         if (iqInterfaceConfig.chipMode == ChipMode::RF_MODE_RF ||                                              // no bb core is active
             (transceiver == Transceiver::RF09 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF09) ||    // 09 bb core is inactive
             (transceiver == Transceiver::RF24 && iqInterfaceConfig.chipMode == ChipMode::RF_MODE_BBRF24) ) {   // 24 bb core is inactive
             return etl::unexpected(Error::INVALID_CHIP_MODE);
+        }
+
+        if ((transceiver == Transceiver::RF09 && !basebandCoreConfig.baseBandEnable09) ||
+            (transceiver == Transceiver::RF24 && !basebandCoreConfig.baseBandEnable24)) {
+            return etl::unexpected(Error::BASEBAND_CORE_DISABLED);
         }
 
         // wait until a new packet is received (the actual packet copying is happening inside the interrupt)
@@ -464,7 +479,13 @@ namespace AT86RF215 {
         }
 
         // return the length
-        return transceiver == Transceiver::RF09 ? receivedPacketLength09 : receivedPacketLength24;
+        etl::pair<uint16_t, uint8_t> returnPair;
+        if (transceiver == Transceiver::RF09) {
+            returnPair = {receivedPacketLength09, bbc09_fskphrrx};
+        } else {
+            returnPair = {receivedPacketLength24, bbc24_fskphrrx};
+        }
+        return returnPair;
     }
 
     etl::expected<void, Error> AT86RF215Chip::packetTransmissionIQEmbeddedControl(
@@ -964,34 +985,35 @@ namespace AT86RF215 {
         return {};
     }
 
-     etl::expected<IrqStatus, Error> AT86RF215Chip::handleIrq() {
+     etl::pair<Error, IrqStatus> AT86RF215Chip::handleIrq() {
         MutexGuard mutexGuard(*this);
+        IrqStatus irqStatus = IrqStatus(); // Default initialize to 0
+
         if (!mutexGuard.lockSpi()) {
-            return etl::unexpected(Error::MUTEX_LOCK_ERROR);
+            return etl::make_pair(Error::MUTEX_LOCK_ERROR, irqStatus);
         }
 
         // Read all interrupt registers
-        IrqStatus irqStatus;
         if (auto status = spiRead8(RegisterAddress::RF09_IRQS); !status.has_value()) {
-            return etl::unexpected(status.error());
+            return etl::make_pair(status.error(), irqStatus);
         } else {
             irqStatus.rf09IrqsStatus = status.value();
         }
 
         if (auto status = spiRead8(RegisterAddress::RF24_IRQS); !status.has_value()) {
-            return etl::unexpected(status.error());
+            return etl::make_pair(status.error(), irqStatus);
         } else {
             irqStatus.rf24IrqsStatus = status.value();
         }
 
         if (auto status = spiRead8(RegisterAddress::BBC0_IRQS); !status.has_value()) {
-            return etl::unexpected(status.error());
+            return etl::make_pair(status.error(), irqStatus);
         } else {
             irqStatus.bbc0IrqsStatus = status.value();
         }
 
         if (auto status = spiRead8(RegisterAddress::BBC1_IRQS); !status.has_value()) {
-            return etl::unexpected(status.error());
+            return etl::make_pair(status.error(), irqStatus);
         } else {
             irqStatus.bbc1IrqsStatus = status.value();
         }
@@ -1046,19 +1068,27 @@ namespace AT86RF215 {
             taskEXIT_CRITICAL();
         }
         if ((irqStatus.bbc0IrqsStatus.value() & InterruptMask::ReceiverFrameEnd) != 0) {
+            // read header contents (debugging info for user)
+            if (auto status = spiRead8(RegisterAddress::BBC0_FSKPHRRX); !status.has_value()) {
+                return etl::make_pair(status.error(), irqStatus);
+            } else {
+                bbc09_fskphrrx = status.value();
+            }
+
+            // read length
             if (auto status = getReceivedLength(Transceiver::RF09); !status.has_value()) {
-                return etl::unexpected(status.error());
+                return etl::make_pair(status.error(), irqStatus);
             } else {
                 receivedPacketLength09 = status.value();
             }
 
             // Sanity check: Ensure received packet length fits in the destination buffer
             if (receivedPacketLength09 > destBuffer09.size()) {
-                return etl::unexpected(Error::DESTINATION_BUFFER_TOO_SMALL);
+                return etl::make_pair(Error::DESTINATION_BUFFER_TOO_SMALL, irqStatus);
             }
 
             if (auto status = spiBlockRead8(RegisterAddress::BBC0_FBRXS, destBuffer09.subspan(0, receivedPacketLength09)); !status.has_value()) {
-                return etl::unexpected(status.error());
+                return etl::make_pair(status.error(), irqStatus);
             }
 
             // allow the respective radio to be locked again
@@ -1119,19 +1149,27 @@ namespace AT86RF215 {
             taskEXIT_CRITICAL();
         }
         if ((irqStatus.bbc1IrqsStatus.value() & InterruptMask::ReceiverFrameEnd) != 0) {
+            // read header contents (debugging info for user)
+            if (auto status = spiRead8(RegisterAddress::BBC1_FSKPHRRX); !status.has_value()) {
+                return etl::make_pair(status.error(), irqStatus);
+            } else {
+                bbc24_fskphrrx = status.value();
+            }
+
+            // read length
             if (auto status = getReceivedLength(Transceiver::RF24); !status.has_value()) {
-                return etl::unexpected(status.error());
+                return etl::make_pair(status.error(), irqStatus);
             } else {
                 receivedPacketLength24 = status.value();
             }
 
             // Sanity check: Ensure received packet length fits in the destination buffer
             if (receivedPacketLength24 > destBuffer24.size()) {
-                return etl::unexpected(Error::DESTINATION_BUFFER_TOO_SMALL);
+                return etl::make_pair(Error::DESTINATION_BUFFER_TOO_SMALL, irqStatus);
             }
 
             if (auto status = spiBlockRead8(RegisterAddress::BBC1_FBRXS, destBuffer24.subspan(0, receivedPacketLength24)); !status.has_value()) {
-                return etl::unexpected(status.error());
+                return etl::make_pair(status.error(), irqStatus);
             }
 
             // allow the respective radio to be locked again
@@ -1143,7 +1181,7 @@ namespace AT86RF215 {
             xEventGroupSetBits(eventGroupHandle, static_cast<uint32_t>(IrqEventGroupBit::BASEBAND_RX_24_COMPLETE));
         }
 
-        return irqStatus;
+        return etl::make_pair(Error::NO_ERROR, irqStatus);
     }
 
     /** =========== Private functions  =========== **/
@@ -1311,7 +1349,6 @@ namespace AT86RF215 {
         uint8_t msg[2] = {static_cast<uint8_t>((rawAddress >> 8) & 0x7F), static_cast<uint8_t>(rawAddress & 0xFF)};
 
         HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET);
-
 
         if (HAL_SPI_Transmit(hspi, msg, 2, 2 * SpiByteWriteCompleteDelayMs) != HAL_OK) {
             HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);

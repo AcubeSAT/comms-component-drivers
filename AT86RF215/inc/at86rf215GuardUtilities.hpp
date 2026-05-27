@@ -157,35 +157,4 @@ namespace AT86RF215 {
         etl::optional<uint8_t> rxbwcInitial;
         etl::optional<uint8_t> bbcPcInitial;
     };
-
-    /**
-     * Ensure that the requested transceiver has the baseband core enabled
-     *
-     * @note It is assumed that the function that creates a SingleShotMeasurementSetup instance, already has gained access
-     *       to the required resources via a MutexGuard instance
-     */
-    class AT86RF215Chip::IntBasebandCoreBasicModeSetup {
-    public:
-        IntBasebandCoreBasicModeSetup(AT86RF215Chip& chip, Transceiver transceiver)
-        : chip(chip), transceiver(transceiver) {
-            if (transceiver == Transceiver::RF09) {
-                pcReg = RegisterAddress::BBC0_PC;
-            } else {
-                pcReg = RegisterAddress::BBC1_PC;
-            }
-        }
-
-        IntBasebandCoreBasicModeSetup(const IntBasebandCoreBasicModeSetup&) = delete;
-        IntBasebandCoreBasicModeSetup& operator=(const IntBasebandCoreBasicModeSetup&) = delete;
-        ~IntBasebandCoreBasicModeSetup();
-
-        etl::expected<void, Error> setup();
-    private:
-        AT86RF215Chip& chip;
-        Transceiver transceiver;
-
-        RegisterAddress pcReg;
-
-        etl::optional<uint8_t> pcInitial;
-    };
 } // namespace AT86RF215

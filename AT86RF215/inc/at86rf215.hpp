@@ -24,6 +24,8 @@ namespace AT86RF215 {
         etl::optional<uint8_t> rf24IrqsStatus;
         etl::optional<uint8_t> bbc0IrqsStatus;
         etl::optional<uint8_t> bbc1IrqsStatus;
+
+        IrqStatus() : rf09IrqsStatus(0), rf24IrqsStatus(0), bbc0IrqsStatus(0), bbc1IrqsStatus(0) {};
     };
 
     enum class Error : uint8_t {
@@ -51,6 +53,8 @@ namespace AT86RF215 {
         BASEBAND_OPERATION_FUNCTION_FAILED,
         FAILED_DUE_TO_DESYNCHRONIZATION,
         EVENT_WAIT_TIMEOUT,
+        BASEBAND_CORE_DISABLED,
+        NO_ERROR
     };
 
     inline uint8_t operator&(const uint8_t a, InterruptMask b) {
@@ -96,11 +100,14 @@ namespace AT86RF215 {
          * This method reads the transceiver interrupt code and takes any necessary actions.
          * It should be used inside a high priority freertos task, dedicated solely to transceiver irq handling.
          *
-         * @returns If successful, a struct with the status of the interrupt registers
-         *          (RF09_IRQS, RF24_IRQS, BBC0_IRQS, BBC1_IRQS)
+         * @returns A struct with the status of the interrupt registers (RF09_IRQS, RF24_IRQS, BBC0_IRQS, BBC1_IRQS),
+         *          as well as whether an error occurred
+         *
+         * @note In case an error occurs while reading an interrupt register, the function immediately returns, setting
+         *       it's value (and any subsequent registers that have not been read yet) to 0.
          *
          */
-        etl::expected<IrqStatus, Error> handleIrq();
+        etl::pair<Error, IrqStatus> handleIrq();
 
         /**
          * Update the configuration structures.
@@ -243,9 +250,10 @@ namespace AT86RF215 {
          * @note The actual copying of the reception packet happens in handleIrq(), when a "receiver frame
          *       end interrupt" arrives. All this function does is return the packet length, once the reception is
          *       complete.
-         * @returns The received packet length. In case of an error, 0 is returned.
+         * @returns A pair with the received packet length (16 bits) and the contents of the register
+         *          BBCn_FSKPHRRX (header information). In case of an error, both members are 0.
          */
-        etl::expected<uint16_t, Error> waitForPacketReceptionBaseband(Transceiver transceiver, uint32_t timeoutDelayMs);
+        etl::expected<etl::pair<uint16_t, uint8_t>, Error> waitForPacketReceptionBaseband(Transceiver transceiver, uint32_t timeoutDelayMs);
 
         /**
          * Transmit a packet through the Tx I/Q interface, when embedded control is active
@@ -394,10 +402,12 @@ namespace AT86RF215 {
         etl::span<uint8_t> destBuffer24;
 
         /**
-         * Received packet's length in baseband core operation
+         * Received packet's length and header contents in baseband core operation
          */
         uint16_t receivedPacketLength09;
         uint16_t receivedPacketLength24;
+        uint8_t bbc09_fskphrrx;
+        uint8_t bbc24_fskphrrx;
 
         /**
          * RAII like objects for mutex locking and mode setup management. Look at @file at86rf215GuardUtilities.hpp

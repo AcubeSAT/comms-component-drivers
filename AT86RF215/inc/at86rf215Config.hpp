@@ -14,9 +14,9 @@
 
 namespace AT86RF215 {
     /// Define here how long the transceiver should wait for certain events, before throwing an error (milliseconds).
-    static constexpr uint16_t SpiAccessMutexTimeoutMs              = 100;
-    static constexpr uint16_t SpiByteWriteCompleteDelayMs          = 100;
-    static constexpr uint16_t SpiByteReadCompleteDelayMs           = 100;
+    static constexpr uint16_t SpiAccessMutexTimeoutMs              = 1000;
+    static constexpr uint16_t SpiByteWriteCompleteDelayMs          = 1;
+    static constexpr uint16_t SpiByteReadCompleteDelayMs           = 1;
     static constexpr uint16_t Radio09AccessMutexDelayMs            = 100;
     static constexpr uint16_t Radio24AccessMutexDelayMs            = 100;
     static constexpr uint16_t IqTxInterfaceAccessMutexDelayMs      = 100;
