@@ -195,10 +195,11 @@ namespace eMMC {
 
         void printError(Error error);
     private:
+        static constexpr uint32_t LogicalBlockSize = 512;
+
         /**
          * Size parameters obtained from HAL drivers (in bytes)
          */
-        uint32_t logicalBlockSize = 512;
         uint32_t logicalBlockCount;
         uint64_t memorySizeInBytes;
         float emmcUsage = 0; // percentage of EMMC memory utilized, calculated upon object construction
@@ -207,11 +208,42 @@ namespace eMMC {
          * Transaction handling parameters
          */
         MMC_HandleTypeDef *hmmc;
-        SemaphoreHandle_t eMMC_access_semaphoreHandle; // for concurrent access protection to the EMMC peripheral itself
-        StaticSemaphore_t eMMC_access_semaphoreBuffer;
+        SemaphoreHandle_t eMMCAccessSemaphoreHandle; // for concurrent access protection to the EMMC peripheral itself
+        StaticSemaphore_t eMMCAccessSemaphoreBuffer;
         StaticSemaphore_t isrTriggeredSemaphoreBuffer;
         static constexpr uint32_t TransactionTimeoutPerBlockMs = 100;
         static constexpr uint32_t SemaphoreTimeoutMs = 1000;
+
+        /**
+         * RAII like class, to avoid unlocking the mutex manually. Locking of the mutex should strictly occur
+         * via creating an instance of this class and calling the 'lockEmmc()' method
+         */
+        class MutexGuard {
+        public:
+            MutexGuard(const MutexGuard&) = delete;
+            MutexGuard& operator=(const MutexGuard&) = delete;
+
+            MutexGuard(SemaphoreHandle_t& eMMCAccessSemaphoreHandle) :
+                eMMCAccessSemaphoreHandle(eMMCAccessSemaphoreHandle), ownsEmmc(false) {};
+
+            bool lockEmmc() {
+                if (xSemaphoreTake(eMMCAccessSemaphoreHandle, pdMS_TO_TICKS(SemaphoreTimeoutMs)) == pdTRUE) {
+                    ownsEmmc = true;
+                    return true;
+                }
+                return false;
+            }
+
+            ~MutexGuard() {
+                if (ownsEmmc) {
+                    xSemaphoreGive(eMMCAccessSemaphoreHandle);
+                }
+            }
+
+        private:
+            bool ownsEmmc;
+            SemaphoreHandle_t& eMMCAccessSemaphoreHandle;
+        };
 
         // The card stays in the busy state for a few ms after a transaction is complete. Through testing, a delay
         // of 4 ms always guarantees the card is not in the busy state anymore, so this value is used as the maximum
@@ -230,9 +262,6 @@ namespace eMMC {
          * Hold state for memory regions that store a single item
          */
         struct MemoryItemHandler {
-            SemaphoreHandle_t semaphoreHandle; // for concurrent access protection to this item
-            StaticSemaphore_t semaphoreBuffer;
-
             uint32_t size;  // in Bytes
             uint32_t startBlockAddress;
             uint32_t endBlockAddress;
@@ -255,9 +284,6 @@ namespace eMMC {
          *  Bytes:        0-31         32 - 63           64 - 95            96 - 127           128 - 511
          */
         struct MemoryQueueHandler {
-            SemaphoreHandle_t semaphoreHandle; // for concurrent access protection to this item
-            StaticSemaphore_t semaphoreBuffer;
-
             uint32_t itemSize; // in Bytes
             bool itemHasPartialBlock; // indicates whether the queue items are multiples of 512 (if not, the last block is partial)
             uint32_t maxNumberOfItems;
