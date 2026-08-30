@@ -1,6 +1,0 @@
-// MEMORY_QUEUE(name, sizeOfItem, numberOfItems, rebootPersistence)
-MEMORY_QUEUE(queueSubBlockTest, 200, 3, 0)
-MEMORY_QUEUE(queueBlockAlignedTest, 512, 3, 0)
-MEMORY_QUEUE(queueNonBlockAlignedTest, 600, 3, 0)
-MEMORY_QUEUE(rebootPersistenceTest, 512, 3, 1)
-// Add more queues here...
