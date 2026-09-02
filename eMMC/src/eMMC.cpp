@@ -38,7 +38,7 @@ namespace eMMC {
         // Initialize the event group
         eventGroupHandle = xEventGroupCreateStatic(&eventGroupBuffer);
 
-        if (eMMCAccessSemaphoreHandle == nullptr || eventGroupHandle == nullptr) {
+        if (eMMCAccessSemaphoreHandle == nullptr || eventGroupHandle == nullptr || hmmc == nullptr) {
             return etl::unexpected(Error::EMMC_FREERTOS_RESOURCE_INITIALIZATION_FAILED);
         }
 
@@ -154,7 +154,7 @@ namespace eMMC {
         return emmcUsage;
     }
 
-    etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, uint8_t* destBuffer, const uint32_t bufferSize, const uint32_t startBlock, const uint32_t numOfBlocks) {
+    etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, etl::span<uint8_t> destBuffer, const uint32_t startBlock, const uint32_t numOfBlocks) {
         MutexGuard mutexGuard(eMMCAccessSemaphoreHandle);
         if (!mutexGuard.lockEmmc()) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
@@ -173,12 +173,12 @@ namespace eMMC {
         if (!itemHandler.hasPartialBlock || // item is block aligned (not leftover bits in the end)
             !requestEndsOnLastItemBlock) {     // OR the last block is not requested
             // Standard check
-            if (bufferSize < numOfBlocks * LogicalBlockSize) {
+            if (destBuffer.size() < numOfBlocks * LogicalBlockSize) {
                 return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
             }
         } else { // the last requested block is the last item block AND there are leftover bits in the end
             // The buffer can be smaller than numOfBlocks * LogicalBlockSize
-            if (bufferSize < (numOfBlocks - 1) * LogicalBlockSize + itemHandler.size % LogicalBlockSize) {
+            if (destBuffer.size() < (numOfBlocks - 1) * LogicalBlockSize + itemHandler.size % LogicalBlockSize) {
                 return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
             }
         }
@@ -208,18 +208,18 @@ namespace eMMC {
             }
 
             // copy tail bytes from last block
-            std::memcpy(destBuffer + (numOfBlocks - 1) * LogicalBlockSize, lastBlock, itemHandler.size % LogicalBlockSize);
+            std::memcpy(destBuffer.data() + (numOfBlocks - 1) * LogicalBlockSize, lastBlock, itemHandler.size % LogicalBlockSize);
 
             return {}; // success
         }
     }
 
-    etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, uint8_t* destBuffer, const uint32_t bufferSize) {
+    etl::expected<void, Error> eMMC_Utilities::getItem(const MemoryItem item, etl::span<uint8_t> destBuffer) {
         const MemoryItemHandler& itemHandler = memoryItemMap[item];
-        return getItem(item, destBuffer, bufferSize, 0, itemHandler.endBlockAddress - itemHandler.startBlockAddress + 1);
+        return getItem(item, destBuffer, 0, itemHandler.endBlockAddress - itemHandler.startBlockAddress + 1);
     }
 
-    etl::expected<void, Error> eMMC_Utilities::storeItem(const MemoryItem item, uint8_t* sourceBuffer, const uint32_t bufferSize) {
+    etl::expected<void, Error> eMMC_Utilities::storeItem(const MemoryItem item, etl::span<uint8_t> sourceBuffer) {
         MutexGuard mutexGuard(eMMCAccessSemaphoreHandle);
         if (!mutexGuard.lockEmmc()) {
             return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
@@ -227,7 +227,7 @@ namespace eMMC {
 
         const MemoryItemHandler& itemHandler = memoryItemMap[item];
 
-        if (bufferSize < itemHandler.size) {
+        if (sourceBuffer.size() < itemHandler.size) {
             return etl::unexpected(Error::EMMC_BUFFER_TOO_SMALL);
         }
 
@@ -245,7 +245,7 @@ namespace eMMC {
         // separately (due to sourceBuffer not being large enough)
         if (itemHandler.hasPartialBlock) {
             alignas(32) uint8_t lastBlock[LogicalBlockSize] = {0};
-            std::memcpy(lastBlock, sourceBuffer + continuousPages * LogicalBlockSize, itemHandler.size % LogicalBlockSize);
+            std::memcpy(lastBlock, sourceBuffer.data() + continuousPages * LogicalBlockSize, itemHandler.size % LogicalBlockSize);
 
             status = writeBlockEMMC(lastBlock, itemHandler.endBlockAddress, 1);
             if (!status.has_value()) {
@@ -256,22 +256,7 @@ namespace eMMC {
         return {}; // success
     }
 
-    etl::expected<void, Error> eMMC_Utilities::resetItem(MemoryItem item) {
-        MutexGuard mutexGuard(eMMCAccessSemaphoreHandle);
-        if (!mutexGuard.lockEmmc()) {
-            return etl::unexpected(Error::EMMC_MUTEX_LOCK_TIMEOUT);
-        }
-
-        const MemoryItemHandler& itemHandler = memoryItemMap[item];
-        etl::expected<void, Error> status = eraseBlocksEMMC(itemHandler.startBlockAddress, itemHandler.endBlockAddress);
-        if (!status.has_value()) {
-            return status;
-        }
-
-        return {};
-    }
-
-    etl::pair<uint32_t, Error> eMMC_Utilities::popItemsFromQueue(const MemoryQueue queue, uint8_t* destBuffer, const uint32_t bufferSize, const uint32_t numItems) {
+    etl::pair<uint32_t, Error> eMMC_Utilities::popItemsFromQueue(const MemoryQueue queue, etl::span<uint8_t> destBuffer, const uint32_t numItems) {
         MutexGuard mutexGuard(eMMCAccessSemaphoreHandle);
         if (!mutexGuard.lockEmmc()) {
             return etl::make_pair(0, Error::EMMC_MUTEX_LOCK_TIMEOUT);
@@ -288,7 +273,7 @@ namespace eMMC {
         }
 
         const uint32_t itemsToPop =  numItems > queueHandler.currentNumberOfItems ? queueHandler.currentNumberOfItems : numItems;
-        if (bufferSize < queueHandler.itemSize * itemsToPop) {
+        if (destBuffer.size() < queueHandler.itemSize * itemsToPop) {
             return etl::make_pair(0, Error::EMMC_BUFFER_TOO_SMALL);
         }
 
@@ -302,7 +287,7 @@ namespace eMMC {
             if (queueHandler.itemHasPartialBlock) {
                 // full read for the continuous blocks
                 if (queueHandler.slotBlockSize != 1) {
-                    status = readBlockEMMC(destBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
+                    status = readBlockEMMC(destBuffer.subspan(i * queueHandler.itemSize), queueHandler.startBlockAddress +
                         queueHandler.headSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize - 1);
                     if (!status.has_value()) {
                         // operation failed
@@ -317,9 +302,9 @@ namespace eMMC {
                     // operation failed
                     return etl::make_pair(i, status.error());
                 }
-                std::memcpy(destBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * LogicalBlockSize, lastBlock, queueHandler.itemSize % LogicalBlockSize);
+                std::memcpy(destBuffer.data() + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * LogicalBlockSize, lastBlock, queueHandler.itemSize % LogicalBlockSize);
             } else {
-                status = readBlockEMMC(destBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
+                status = readBlockEMMC(destBuffer.subspan(i * queueHandler.itemSize), queueHandler.startBlockAddress +
                     queueHandler.headSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize);
                 if (!status.has_value()) {
                     // operation failed
@@ -363,7 +348,7 @@ namespace eMMC {
         return etl::make_pair(itemsToPop, Error::EMMC_NO_ERROR); // success
     }
 
-    etl::pair<uint32_t, Error> eMMC_Utilities::pushItemsToQueue(const MemoryQueue queue, uint8_t* sourceBuffer, const uint32_t bufferSize, const uint32_t numItems) {
+    etl::pair<uint32_t, Error> eMMC_Utilities::pushItemsToQueue(const MemoryQueue queue, etl::span<uint8_t> sourceBuffer, const uint32_t numItems) {
         MutexGuard mutexGuard(eMMCAccessSemaphoreHandle);
         if (!mutexGuard.lockEmmc()) {
             return etl::make_pair(0, Error::EMMC_MUTEX_LOCK_TIMEOUT);
@@ -380,7 +365,7 @@ namespace eMMC {
 
         const uint32_t itemsToPush = numItems > (queueHandler.maxNumberOfItems - queueHandler.currentNumberOfItems) ?
             (queueHandler.maxNumberOfItems - queueHandler.currentNumberOfItems) : numItems;
-        if (bufferSize < queueHandler.itemSize * itemsToPush) {
+        if (sourceBuffer.size() < queueHandler.itemSize * itemsToPush) {
             return etl::make_pair(0, Error::EMMC_BUFFER_TOO_SMALL);
         }
 
@@ -393,7 +378,7 @@ namespace eMMC {
             if (queueHandler.itemHasPartialBlock) {
                 // full write (for continuous blocks)
                 if (queueHandler.slotBlockSize != 1) {
-                    status = writeBlockEMMC(sourceBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
+                    status = writeBlockEMMC(sourceBuffer.subspan(i * queueHandler.itemSize), queueHandler.startBlockAddress +
                         queueHandler.tailSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize - 1);
                     if (!status.has_value()) {
                         // operation failed
@@ -404,7 +389,7 @@ namespace eMMC {
                 // partial write for the last block (so there may be no reading beyond the sourceBuffer's edge)
                 alignas(32) uint8_t lastBlock[LogicalBlockSize] = {0};
                 std::memcpy(lastBlock,
-                    sourceBuffer + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * LogicalBlockSize,
+                    sourceBuffer.data() + i * queueHandler.itemSize + (queueHandler.slotBlockSize - 1) * LogicalBlockSize,
                     queueHandler.itemSize % LogicalBlockSize);
                 status = writeBlockEMMC(lastBlock,
                     queueHandler.startBlockAddress + queueHandler.tailSlotPointer * queueHandler.slotBlockSize + (queueHandler.slotBlockSize - 1),
@@ -414,7 +399,7 @@ namespace eMMC {
                     return etl::make_pair(i, status.error());
                 }
             } else {
-                status = writeBlockEMMC(sourceBuffer + i * queueHandler.itemSize, queueHandler.startBlockAddress +
+                status = writeBlockEMMC(sourceBuffer.subspan(i * queueHandler.itemSize), queueHandler.startBlockAddress +
                     queueHandler.tailSlotPointer * queueHandler.slotBlockSize, queueHandler.slotBlockSize);
                 if (!status.has_value()) {
                     // operation failed
@@ -465,10 +450,6 @@ namespace eMMC {
         }
 
         MemoryQueueHandler& queueHandler = memoryQueueMap[queue];
-        etl::expected<void, Error> status = eraseBlocksEMMC(queueHandler.startBlockAddress, queueHandler.endBlockAddress);
-        if (!status.has_value()) {
-            return status;
-        }
 
         queueHandler.currentNumberOfItems = 0;
         queueHandler.headSlotPointer = 0;
@@ -483,7 +464,7 @@ namespace eMMC {
                 static_cast<uint8_t>(MagicValue)
             }; // the head, tail and number of items are initialized to zero
 
-            status = writeBlockEMMC(metadataBuff,queueHandler.endBlockAddress + 1, 1);
+            auto status = writeBlockEMMC(metadataBuff,queueHandler.endBlockAddress + 1, 1);
             if (!status.has_value()) {
                 return status;
             }
@@ -491,11 +472,11 @@ namespace eMMC {
         return {};
     }
 
-    etl::expected<void, Error> eMMC_Utilities::readBlockEMMC(uint8_t* destBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
+    etl::expected<void, Error> eMMC_Utilities::readBlockEMMC(etl::span<uint8_t> destBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
         // reset event bits
         xEventGroupClearBits(eventGroupHandle, readCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit);
 
-        if (HAL_MMC_ReadBlocks_IT(hmmc, destBuffer, block_address, numberOfBlocks) != HAL_OK) {
+        if (HAL_MMC_ReadBlocks_IT(hmmc, destBuffer.data(), block_address, numberOfBlocks) != HAL_OK) {
             return etl::unexpected(Error::EMMC_READ_FAILURE);
         }
 
@@ -532,7 +513,7 @@ namespace eMMC {
             // the data is fetched directly from AXI SRAM, and not from the cache. This is required, since the cache is not
             // aware that the SDMMC's IDMA controller wrote new data to AXI SRAM
             if (SCB->CCR & SCB_CCR_DC_Msk) {
-                SCB_InvalidateDCache_by_Addr(destBuffer, LogicalBlockSize * numberOfBlocks);
+                SCB_InvalidateDCache_by_Addr(destBuffer.data(), LogicalBlockSize * numberOfBlocks);
             }
 
             return {};
@@ -552,17 +533,17 @@ namespace eMMC {
         return etl::unexpected(Error::EMMC_READ_FAILURE);
     }
 
-    etl::expected<void, Error> eMMC_Utilities::writeBlockEMMC(uint8_t* sourceBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
+    etl::expected<void, Error> eMMC_Utilities::writeBlockEMMC(etl::span<uint8_t> sourceBuffer, const uint32_t block_address, const uint32_t numberOfBlocks) {
         // reset event bits
         xEventGroupClearBits(eventGroupHandle, writeCompleteGroupBit | errorOccuredGroupBit | transactionAbortedGroupBit);
 
         // clean the data cache, to ensure that the data the user wrote in sourceBuffer is sent to AXI SRAM if it
         // has not already. This is required, as the SDMMC peripheral IDMA controller reads data directly from AXI SRAM
         if (SCB->CCR & SCB_CCR_DC_Msk) {
-            SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(sourceBuffer), LogicalBlockSize * numberOfBlocks);
+            SCB_CleanDCache_by_Addr(reinterpret_cast<uint32_t *>(sourceBuffer.data()), LogicalBlockSize * numberOfBlocks);
         }
 
-        if (HAL_MMC_WriteBlocks_IT(hmmc, sourceBuffer, block_address, numberOfBlocks) != HAL_OK) {
+        if (HAL_MMC_WriteBlocks_IT(hmmc, sourceBuffer.data(), block_address, numberOfBlocks) != HAL_OK) {
             return etl::unexpected(Error::EMMC_WRITE_FAILURE);
         }
 
@@ -611,12 +592,12 @@ namespace eMMC {
         return etl::unexpected(Error::EMMC_WRITE_FAILURE);
     }
 
-    etl::expected<void, Error> eMMC_Utilities::eraseBlocksEMMC(const uint32_t block_address_start, const  uint32_t block_address_end) {
-        if (block_address_start > block_address_end) {
+    etl::expected<void, Error> eMMC_Utilities::eraseBlocksEMMC(const uint32_t blockAddressStart, const  uint32_t block_address_end) {
+        if (blockAddressStart > block_address_end) {
             return etl::unexpected(Error::EMMC_INVALID_MEMORY_BLOCK_REGION);
         }
 
-        if (HAL_MMC_Erase(hmmc, block_address_start, block_address_end) != HAL_OK) {
+        if (HAL_MMC_Erase(hmmc, blockAddressStart, block_address_end) != HAL_OK) {
             return etl::unexpected(Error::EMMC_ERASE_BLOCK_FAILURE);
         }
 

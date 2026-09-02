@@ -4,6 +4,7 @@
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "etl/expected.h"
+#include "etl/span.h"
 #include "event_groups.h"
 
 namespace eMMC {
@@ -109,7 +110,7 @@ namespace eMMC {
          * @brief Get the entire item
          * @note If the item size is not a multiple of the block size, the function ensures that leftover bytes are not copied
          */
-        [[nodiscard]] etl::expected<void, Error> getItem(MemoryItem item, uint8_t* destBuffer, uint32_t bufferSize);
+        [[nodiscard]] etl::expected<void, Error> getItem(MemoryItem item, etl::span<uint8_t> destBuffer);
 
         /**
          * @brief Read a partial item
@@ -123,17 +124,12 @@ namespace eMMC {
          * @note If the item size is not a multiple of the block size, the function ensures that leftover bytes are not copied,
          *       in the scenario that the last block is requested.
          */
-        [[nodiscard]] etl::expected<void, Error> getItem(MemoryItem item, uint8_t* destBuffer, uint32_t bufferSize, uint32_t startBlock, uint32_t numOfBlocks);
+        [[nodiscard]] etl::expected<void, Error> getItem(MemoryItem item, etl::span<uint8_t> destBuffer, uint32_t startBlock, uint32_t numOfBlocks);
 
-        [[nodiscard]] etl::expected<void, Error> storeItem(MemoryItem item, uint8_t* sourceBuffer, uint32_t bufferSize);
+        [[nodiscard]] etl::expected<void, Error> storeItem(MemoryItem item, etl::span<uint8_t> sourceBuffer);
 
         // TODO this function would make sense if the item is very large and has to be partially copied, but we dont need this right now
-        [[nodiscard]] etl::expected<void, Error> storeItem(MemoryItem item, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t startBlock, uint32_t numOfBlocks);
-
-        /**
-         * Debugging function. Erases the data of that specific item.
-         */
-        [[nodiscard]] etl::expected<void, Error> resetItem(MemoryItem item);
+        [[nodiscard]] etl::expected<void, Error> storeItem(MemoryItem item, etl::span<uint8_t> sourceBuffer, uint32_t startBlock, uint32_t numOfBlocks);
 
         /** Queue interface **/
         [[nodiscard]] bool isQueueEmpty(const MemoryQueue queue) {
@@ -166,7 +162,7 @@ namespace eMMC {
          *       bits in the queue slot are not returned
          * @returns Returns the actual amount of items popped and whether the operation as a whole was successful or not.
          */
-        [[nodiscard]] etl::pair<uint32_t, Error> popItemsFromQueue(MemoryQueue queue, uint8_t* destBuffer, uint32_t bufferSize, uint32_t numItems);
+        [[nodiscard]] etl::pair<uint32_t, Error> popItemsFromQueue(MemoryQueue queue, etl::span<uint8_t> destBuffer, uint32_t numItems);
 
         /**
          * @brief Push one or more items to the queue
@@ -176,7 +172,7 @@ namespace eMMC {
          *                      using the alignas(32) specifier. If the cache is disabled, alignment is irrelevant.
          * @returns Returns the actual amount of items pushed and whether the operation as a whole was successful or not.
          */
-        [[nodiscard]] etl::pair<uint32_t, Error> pushItemsToQueue(MemoryQueue queue, uint8_t* sourceBuffer, uint32_t bufferSize, uint32_t numItems);
+        [[nodiscard]] etl::pair<uint32_t, Error> pushItemsToQueue(MemoryQueue queue, etl::span<uint8_t> sourceBuffer, uint32_t numItems);
 
         /**
          * Debugging function. Erases the data of that specific queue.
@@ -186,12 +182,12 @@ namespace eMMC {
         /**
          * @brief Utility function. Write to eMMC blocks.
          */
-        [[nodiscard]] etl::expected<void, Error> writeBlockEMMC(uint8_t* sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+        [[nodiscard]] etl::expected<void, Error> writeBlockEMMC(etl::span<uint8_t> sourceBuffer, uint32_t block_address, uint32_t numberOfBlocks);
 
         /**
          * @brief Utility function. Read from eMMC blocks.
          */
-        [[nodiscard]] etl::expected<void, Error> readBlockEMMC(uint8_t* destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
+        [[nodiscard]] etl::expected<void, Error> readBlockEMMC(etl::span<uint8_t> destBuffer, uint32_t block_address, uint32_t numberOfBlocks);
 
         void printError(Error error);
     private:
@@ -308,8 +304,13 @@ namespace eMMC {
 
         /**
          * @brief Erases specified memory region from eMMC
+         *
+         * TODO This function uses HAL_MMC_Erase, which according to documentation erases on the "block" level, but
+         *      according to the commands send in the code, erases happen in the "erase group" level (which is larger
+         *      than a block and device specific). Therefore this function is not working properly at the moment
+         *      and needs a rework, but it is unlikely that we will use it anyways
          */
-        etl::expected<void, Error> eraseBlocksEMMC(uint32_t block_address_start, uint32_t block_address_end);
+        etl::expected<void, Error> eraseBlocksEMMC(uint32_t blockAddressStart, uint32_t blockAddressEnd);
     };
     extern eMMC_Utilities eMMC_Utils;
 } // namespace eMMC
