@@ -5,7 +5,7 @@ namespace AT86RF215 {
 
 void AT86RF215::spi_write_8(uint16_t address, uint8_t value, Error &err) {
 	uint8_t msg[3] = { static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF), value };
-	HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET);
 	uint8_t hal_error = HAL_SPI_Transmit(hspi, msg, 3, TIMEOUT);
 
 	if (hal_error != HAL_OK) {
@@ -13,14 +13,14 @@ void AT86RF215::spi_write_8(uint16_t address, uint8_t value, Error &err) {
 		return;
 	}
 
-	HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
 	err = NO_ERRORS;
 }
 
 uint8_t AT86RF215::spi_read_8(uint16_t address, Error &err) {
 	uint8_t msg[2] = { static_cast<uint8_t>((address >> 8) & 0x7F), static_cast<uint8_t>(address & 0xFF) };
 	uint8_t response[3];
-	HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET);
 	uint8_t hal_error = HAL_SPI_TransmitReceive(hspi, msg, response, 3,
 			TIMEOUT);
 
@@ -29,7 +29,7 @@ uint8_t AT86RF215::spi_read_8(uint16_t address, Error &err) {
 		return 0;
 	}
 
-	HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
 	err = Error::NO_ERRORS;
 
 	return response[2];
@@ -38,7 +38,7 @@ uint8_t AT86RF215::spi_read_8(uint16_t address, Error &err) {
 void AT86RF215::spi_block_write_8(uint16_t address, uint16_t n, uint8_t *value,
 		Error &err) {
 	uint8_t msg[2] = { static_cast<uint8_t>(0x80 | ((address >> 8) & 0x7F)), static_cast<uint8_t>(address & 0xFF) };
-	HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET);
 	uint8_t hal_error = HAL_SPI_Transmit(hspi, msg, 2, TIMEOUT);
 	hal_error = HAL_SPI_Transmit(hspi, value, n, TIMEOUT);
 
@@ -46,7 +46,7 @@ void AT86RF215::spi_block_write_8(uint16_t address, uint16_t n, uint8_t *value,
 		err = Error::FAILED_WRITING_TO_REGISTER;
 		return;
 	}
-	HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
 
 	err = Error::NO_ERRORS;
 }
@@ -60,7 +60,7 @@ uint8_t* AT86RF215::spi_block_read_8(uint16_t address, uint8_t n,
 		uint8_t *response, Error &err) {
 	uint8_t msg[2] = { static_cast<uint8_t>((address >> 8) & 0x7F), static_cast<uint8_t>(address & 0xFF) };
 
-	HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_RESET);
 	uint8_t hal_error = HAL_SPI_TransmitReceive(hspi, msg, response, n + 2,
 			TIMEOUT);
 
@@ -69,7 +69,7 @@ uint8_t* AT86RF215::spi_block_read_8(uint16_t address, uint8_t n,
 		return response;
 	}
 
-	HAL_GPIO_WritePin(SPI_NSS_GPIO_Port, SPI_NSS_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(RF_NSS_GPIO_Port, RF_NSS_Pin, GPIO_PIN_SET);
 	err = NO_ERRORS;
 	return response + 2;
 }
