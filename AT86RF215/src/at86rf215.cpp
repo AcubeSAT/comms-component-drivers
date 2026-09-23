@@ -2074,6 +2074,11 @@ namespace AT86RF215 {
 
         // Set RFn_PAC
         reg = (static_cast<uint8_t>(paCurrControl) << 5) | (txOutPower & 0x1F);
+        const uint8_t maxAllowedPower = transceiver == Transceiver::RF09 ? MaxTxPower09 : MaxTxPower24;
+        if (reg > maxAllowedPower) {
+            return etl::unexpected(Error::INVALID_POWER_SETTING);
+        }
+
         if (auto status = spiWrite8(regpac, reg); !status.has_value()) {
             return status;
         }

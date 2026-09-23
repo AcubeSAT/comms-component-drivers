@@ -30,6 +30,10 @@ namespace AT86RF215 {
     static constexpr uint16_t EnergyDetCompletion09DelayMs         = 100;
     static constexpr uint16_t EnergyDetCompletion24DelayMs         = 100;
 
+    /// Max allowed output power (RFn_PAC.TXPWR). The configurable range is 0x00 to 0x1F
+    static constexpr uint8_t MaxTxPower09 = 0x1F;
+    static constexpr uint8_t MaxTxPower24 = 0x16;
+
     struct RXConfig {
         // RFn_RXBWC
         ReceiverBandwidth receiverBandwidth09, receiverBandwidth24;
