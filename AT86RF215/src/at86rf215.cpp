@@ -49,6 +49,23 @@ namespace AT86RF215 {
         radioInterruptsConfig = radio_interrupts_config;
         iqInterfaceConfig = iq_interface_config;
 
+        // Reset IRQ status registers and interrupt line
+        if (auto status = spiRead8(RegisterAddress::RF09_IRQS); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+
+        if (auto status = spiRead8(RegisterAddress::RF24_IRQS); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+
+        if (auto status = spiRead8(RegisterAddress::BBC0_IRQS); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+
+        if (auto status = spiRead8(RegisterAddress::BBC1_IRQS); !status.has_value()) {
+            return etl::unexpected(status.error());
+        }
+
         if (auto status = setStatePrivate(Transceiver::RF09, State::RF_TRXOFF); !status.has_value()) {
             return status;
         }
@@ -102,7 +119,7 @@ namespace AT86RF215 {
         // Wait for a very small amount of time to ensure the transceiver transitions to state RF_TRXOFF
         vTaskDelay(pdMS_TO_TICKS(2));
 
-        // Reset IRQ status registers
+        // Reset IRQ status registers and interrupt line
         if (auto status = spiRead8(RegisterAddress::RF09_IRQS); !status.has_value()) {
             return etl::unexpected(status.error());
         }
@@ -2075,7 +2092,7 @@ namespace AT86RF215 {
         // Set RFn_PAC
         reg = (static_cast<uint8_t>(paCurrControl) << 5) | (txOutPower & 0x1F);
         const uint8_t maxAllowedPower = transceiver == Transceiver::RF09 ? MaxTxPower09 : MaxTxPower24;
-        if (reg > maxAllowedPower) {
+        if (txOutPower > maxAllowedPower) {
             return etl::unexpected(Error::INVALID_POWER_SETTING);
         }
 
