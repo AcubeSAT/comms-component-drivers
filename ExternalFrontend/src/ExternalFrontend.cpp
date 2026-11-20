@@ -7,36 +7,30 @@
 namespace ExternalFrontend {
     ExternalFrontendUtilities externalFrontendUtils = ExternalFrontendUtilities();
 
-    etl::expected<float, Error> ExternalFrontendUtilities::adcCodeToVoltage(uint16_t adcCode, uint16_t vrefIntCode, uint32_t adcMaxCode) {
-        if (vrefIntCode == 0 || vrefIntCode > tempAndVrefIntADCMaxCode || adcCode > adcMaxCode) {
+    etl::expected<float, Error> ExternalFrontendUtilities::adcCodeToVoltage(uint16_t adcCode, uint32_t adcMaxCode) {
+        const float vref = getVref();
+        if (vref <= 0) {
+            return etl::unexpected{Error{ErrorType::INVALID_VREF}};
+        }
+
+        if (adcCode > adcMaxCode) {
             return etl::unexpected{Error{ErrorType::INVALID_CODE}};
         }
 
-        // VREFINT_CAL is calculated on 16 bit resolution on STM32H7. Scale to current resolution of ADC
-        const float vrefIntCal = static_cast<float>(*VREFINT_CAL_ADDR)
-                                 * static_cast<float>(tempAndVrefIntADCMaxCode) / ((1 << 16) - 1);
-
-        const float vdda = VREFINT_CAL_VREF * (vrefIntCal / static_cast<float>(vrefIntCode));
-
-        return (static_cast<float>(adcCode) / static_cast<float>(adcMaxCode)) * vdda;
+        return (static_cast<float>(adcCode) / static_cast<float>(adcMaxCode)) * vref;
     }
 
-    etl::expected<uint16_t, Error> ExternalFrontendUtilities::voltageToDACCode(float voltage, uint16_t vrefIntCode) {
-        if (vrefIntCode == 0) {
-            return etl::unexpected{Error{ErrorType::INVALID_CODE}};
+    etl::expected<uint16_t, Error> ExternalFrontendUtilities::voltageToDACCode(float voltage) {
+        const float vref = getVref();
+        if (vref <= 0) {
+            return etl::unexpected{Error{ErrorType::INVALID_VREF}};
         }
 
-        // VREFINT_CAL is calculated on 16 bit resolution on STM32H7. Scale to current resolution of ADC
-        const float vrefIntCal = static_cast<float>(*VREFINT_CAL_ADDR)
-                                 * static_cast<float>(tempAndVrefIntADCMaxCode) / ((1 << 16) - 1);
-
-        float vdda = VREFINT_CAL_VREF * (vrefIntCal / static_cast<float>(vrefIntCode));
-
-        if (voltage < 0 || voltage > vdda) {
-            return etl::unexpected<Error>{{ErrorType::INVALID_VOLTAGE}};
+        if (voltage < 0 || voltage > vref) {
+            return etl::unexpected<Error>{{ErrorType::VOLTAGE_OUT_OF_BOUNDS}};
         }
 
-        float dacCodeFloat = (voltage / vdda) * MaxDacCode;
+        float dacCodeFloat = (voltage / vref) * MaxDacCode;
         return static_cast<uint16_t>(std::roundf(dacCodeFloat));
     }
 
@@ -57,24 +51,32 @@ namespace ExternalFrontend {
         }
     }
 
+    etl::expected<float, Error> ExternalFrontendUtilities::clampVoltage(float voltage, float lower, float upper) {
+        if (voltage < lower - VoltageBoundTolerance) {
+            return etl::unexpected<Error>{{ErrorType::VOLTAGE_OUT_OF_BOUNDS}};
+        }
+        if (voltage < lower) {
+            return lower;
+        }
+        if (voltage <= upper) {
+            return voltage;
+        }
+        if (voltage <= upper + VoltageBoundTolerance) {
+            return upper;
+        }
+
+        return etl::unexpected<Error>{{ErrorType::VOLTAGE_OUT_OF_BOUNDS}};
+    }
+
     etl::expected<float, Error> ExternalFrontendUtilities::targetOutputPowerToVoltage(float targetOutputPowerDBm) {
+        const float vref = getVref();
+        if (vref <= 0) {
+            return etl::unexpected{Error{ErrorType::INVALID_VREF}};
+        }
+
         const float vset = ad8318VsetSlope * (targetOutputPowerDBm - ad8318Pout1) + ad8318Vset1;
-
-        // obtain upper boundary for vset
-        auto status = getAgcTempAndVrefIntCodes();
-        if (!status.has_value()) {
-            return etl::unexpected{status.error()};
-        }
-        if (status.value().first == 0) {
-            return etl::unexpected{Error{ErrorType::INVALID_CODE}};
-        }
-        //   VREFINT_CAL is calculated on 16 bit resolution on STM32H7. Scale to current resolution of ADC
-        const float vrefIntCal = static_cast<float>(*VREFINT_CAL_ADDR)
-                                 * static_cast<float>(tempAndVrefIntADCMaxCode) / ((1 << 16) - 1);
-        float vdda = VREFINT_CAL_VREF * (vrefIntCal / static_cast<float>(status.value().first));
-
-        if (vset < 0 || vset > vdda) {
-            return etl::unexpected<Error>{{ErrorType::INVALID_VOLTAGE}};
+        if (vset < AD8318MinVset || vset > AD8318MaxVset) {
+            return etl::unexpected<Error>{{ErrorType::VOLTAGE_OUT_OF_BOUNDS}};
         }
         return vset;
     }
@@ -88,18 +90,38 @@ namespace ExternalFrontend {
     }
 
     etl::expected<float, Error> ExternalFrontendUtilities::voltageToGain(float gainVoltage) {
-        if (gainVoltage < ADL5330MinVgain || gainVoltage > ADL5330MaxVgain) {
-            return etl::unexpected<Error>{{ErrorType::GAIN_OUT_OF_BOUNDS}};
+        auto clampedVoltageStatus = clampVoltage(gainVoltage, ADL5330MinVgain, ADL5330MaxVgain);
+        if (!clampedVoltageStatus.has_value()) {
+            return clampedVoltageStatus;
         }
 
-        return (1 / ADL5330VgainSlope) * (gainVoltage - ADL5330MinVgain) + ADL5330MinGain;
+        return (1 / ADL5330VgainSlope) * (clampedVoltageStatus.value() - ADL5330MinVgain) + ADL5330MinGain;
     }
 
     etl::expected<void, Error> ExternalFrontendUtilities::initialize(
+            ADC_HandleTypeDef* ad8318Temp_ADCHandle,
+            ADC_HandleTypeDef* gain_ADCHandle,
+            DAC_HandleTypeDef* vset_DACHandle,
+            uint32_t dac_ChannelNumber,
+            etl::delegate<float()> get_Vref,
             float ad8318_Vset1,
             float ad8318_Vset2,
             float ad8318_Pout1,
             float ad8318_Pout2) {
+
+        if (ad8318Temp_ADCHandle == nullptr || gain_ADCHandle == nullptr || vset_DACHandle == nullptr) {
+            return etl::unexpected{Error{ErrorType::NULL_PTR}};
+        }
+
+        if (!get_Vref.is_valid()) {
+            return etl::unexpected{Error{ErrorType::INVALID_DELEGATE}};
+        }
+
+        ad8318TempADCHandle = ad8318Temp_ADCHandle;
+        gainADCHandle = gain_ADCHandle;
+        vsetDACHandle = vset_DACHandle;
+        dacChannelNumber = dac_ChannelNumber;
+        getVref = get_Vref;
 
         if ((ad8318_Vset1 == ad8318_Vset2) || (ad8318_Pout1 == ad8318_Pout2)) {
             return etl::unexpected<Error>{{ErrorType::IDENTICAL_CALIBRATION_POINTS}};
@@ -110,13 +132,13 @@ namespace ExternalFrontend {
         ad8318Pout2 = ad8318_Pout2;
         ad8318VsetSlope = (ad8318Vset2 - ad8318Vset1) / (ad8318Pout2 - ad8318Pout1);
 
-        if (auto status = getMaxADCCode(tempAndVrefIntADCHandle); !status.has_value()) {
+        if (auto status = getMaxADCCode(*ad8318TempADCHandle); !status.has_value()) {
             return etl::unexpected{Error{status.error()}};
         } else {
-            tempAndVrefIntADCMaxCode = status.value();
+            ad8318TempADCMaxCode = status.value();
         }
 
-        if (auto status = getMaxADCCode(gainADCHandle); !status.has_value()) {
+        if (auto status = getMaxADCCode(*gainADCHandle); !status.has_value()) {
             return etl::unexpected{Error{status.error()}};
         } else {
             gainADCMaxCode = status.value();
@@ -152,46 +174,43 @@ namespace ExternalFrontend {
     }
 
     etl::expected<void, Error> ExternalFrontendUtilities::enableUhfRxFrontend(float vset, bool agcMode) {
-        if (rxUhfActive) {
+        if (rxFrontendState != UHFRxFrontendState::OFF) {
             if (auto disableUhfRxFrontendStatus = disableUhfRxFrontend(); !disableUhfRxFrontendStatus.has_value()) {
                 return disableUhfRxFrontendStatus;
             }
         }
 
-        auto agcTempAndVrefIntStatus = getAgcTempAndVrefIntCodes();
-        if (!agcTempAndVrefIntStatus.has_value()) {
-            return etl::unexpected{agcTempAndVrefIntStatus.error()};
-        }
-
-        auto voltageToDacCodeStatus = voltageToDACCode(vset, agcTempAndVrefIntStatus.value().first);
+        auto voltageToDacCodeStatus = voltageToDACCode(vset);
         if (!voltageToDacCodeStatus.has_value()) {
+            static_cast<void>(disableUhfRxFrontend());
             return etl::unexpected{voltageToDacCodeStatus.error()};
         }
 
-        if (auto status = HAL_ADCEx_Calibration_Start(&gainADCHandle, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+        if (auto status = HAL_ADCEx_Calibration_Start(gainADCHandle, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
               status != HAL_OK) {
+            static_cast<void>(disableUhfRxFrontend());
             return etl::unexpected{Error{ErrorType::GAIN_ADC_FAILURE, status}};
         }
 
-        if (auto status = HAL_ADC_Start(&gainADCHandle); status != HAL_OK) {
+        if (auto status = HAL_ADC_Start(gainADCHandle); status != HAL_OK) {
             static_cast<void>(disableUhfRxFrontend());
             return etl::unexpected{Error{ErrorType::GAIN_ADC_FAILURE, status}};
         }
 
         // This struct is used by the function just to return the trimming value (not needed anywhere else)
         DAC_ChannelConfTypeDef sConfig = {};
-        if (auto status = HAL_DACEx_SelfCalibrate(&vsetDACHandle, &sConfig, dacChannelNumber);
+        if (auto status = HAL_DACEx_SelfCalibrate(vsetDACHandle, &sConfig, dacChannelNumber);
             status != HAL_OK) {
             static_cast<void>(disableUhfRxFrontend());
             return etl::unexpected{Error{ErrorType::SETPOINT_VOLTAGE_DAC_FAILURE, status}};
         }
 
-        if (auto status = HAL_DAC_Start(&vsetDACHandle, dacChannelNumber); status != HAL_OK) {
+        if (auto status = HAL_DAC_Start(vsetDACHandle, dacChannelNumber); status != HAL_OK) {
             static_cast<void>(disableUhfRxFrontend());
             return etl::unexpected{Error{ErrorType::SETPOINT_VOLTAGE_DAC_FAILURE, status}};
         }
 
-        if (auto status = HAL_DAC_SetValue(&vsetDACHandle, dacChannelNumber, DAC_ALIGN_12B_R,voltageToDacCodeStatus.value());
+        if (auto status = HAL_DAC_SetValue(vsetDACHandle, dacChannelNumber, DAC_ALIGN_12B_R,voltageToDacCodeStatus.value());
             status != HAL_OK) {
             static_cast<void>(disableUhfRxFrontend());
             return etl::unexpected{Error{ErrorType::SETPOINT_VOLTAGE_DAC_FAILURE, status}};
@@ -199,15 +218,16 @@ namespace ExternalFrontend {
 
         if (agcMode) {
             switchToAGCMode();
-            adl5330VsetDacCode = voltageToDacCodeStatus.value();
+            ad8318VsetDacCode = voltageToDacCodeStatus.value();
+            rxFrontendState = UHFRxFrontendState::AGC_MODE_UNLOCKED;
         } else {
             switchToConstantGainMode();
+            rxFrontendState = UHFRxFrontendState::CONSTANT_GAIN_MODE;
         }
 
         HAL_GPIO_WritePin(EN_RX_UHF_GPIO_Port, EN_RX_UHF_Pin, GPIO_PIN_RESET);
         HAL_GPIO_WritePin(EN_UHF_AMP_RX_GPIO_Port, EN_UHF_AMP_RX_Pin, GPIO_PIN_SET);
         vTaskDelay(pdMS_TO_TICKS(FrontendTurnOnDelayMs));
-        rxUhfActive = true;
         return {};
     }
 
@@ -242,20 +262,19 @@ namespace ExternalFrontend {
         HAL_GPIO_WritePin(EN_UHF_AMP_RX_GPIO_Port, EN_UHF_AMP_RX_Pin, GPIO_PIN_RESET);
 
         etl::optional<Error> lastError;
-        if (HAL_StatusTypeDef status = HAL_DAC_Stop(&vsetDACHandle, dacChannelNumber); status != HAL_OK) {
+        if (HAL_StatusTypeDef status = HAL_DAC_Stop(vsetDACHandle, dacChannelNumber); status != HAL_OK) {
             lastError = Error{ErrorType::SETPOINT_VOLTAGE_DAC_FAILURE, status};
         }
 
-        if (HAL_StatusTypeDef status = HAL_ADC_Stop(&gainADCHandle); status != HAL_OK) {
+        if (HAL_StatusTypeDef status = HAL_ADC_Stop(gainADCHandle); status != HAL_OK) {
             lastError = Error{ErrorType::GAIN_ADC_FAILURE, status};
         }
 
-        if (HAL_StatusTypeDef status = HAL_ADC_Stop(&tempAndVrefIntADCHandle); status != HAL_OK) {
-            lastError = Error{ErrorType::TEMP_VREFINT_ADC_FAILURE, status};
+        if (HAL_StatusTypeDef status = HAL_ADC_Stop(ad8318TempADCHandle); status != HAL_OK) {
+            lastError = Error{ErrorType::AD8318_TEMP_ADC_FAILURE, status};
         }
 
-        adl5330VsetDacCode.reset();
-        rxUhfActive = false;
+        rxFrontendState = UHFRxFrontendState::OFF;
 
         if (lastError.has_value()) {
             return etl::unexpected{lastError.value()};
@@ -273,53 +292,34 @@ namespace ExternalFrontend {
         sbandActive = false;
     }
 
-    etl::expected<etl::pair<uint16_t, uint16_t>, Error> ExternalFrontendUtilities::getAgcTempAndVrefIntCodes() {
-        if (HAL_StatusTypeDef status = HAL_ADCEx_Calibration_Start(&tempAndVrefIntADCHandle, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
-            status != HAL_OK) {
-            return etl::unexpected<Error>{{ErrorType::TEMP_VREFINT_ADC_FAILURE, status}};
-        }
-
-        if (HAL_StatusTypeDef status = HAL_ADC_Start(&tempAndVrefIntADCHandle); status != HAL_OK) {
-            return etl::unexpected<Error>{{ErrorType::TEMP_VREFINT_ADC_FAILURE, status}};
-        }
-
-        // Obtain vrefint code
-        if (HAL_StatusTypeDef status = HAL_ADC_PollForConversion(&tempAndVrefIntADCHandle, TempConversionMaxDelayMs);
-            status != HAL_OK) {
-            HAL_ADC_Stop(&tempAndVrefIntADCHandle);
-            return etl::unexpected<Error>{{ErrorType::TEMP_VREFINT_ADC_FAILURE, status}};
-        }
-        const uint32_t vrefintAdcCode = HAL_ADC_GetValue(&tempAndVrefIntADCHandle);
-
-        // Obtain temperature code
-        if (HAL_StatusTypeDef status = HAL_ADC_PollForConversion(&tempAndVrefIntADCHandle, TempConversionMaxDelayMs);
-            status != HAL_OK) {
-            HAL_ADC_Stop(&tempAndVrefIntADCHandle);
-            return etl::unexpected<Error>{{ErrorType::TEMP_VREFINT_ADC_FAILURE, status}};
-        }
-        const uint32_t adcVoltage = HAL_ADC_GetValue(&tempAndVrefIntADCHandle);
-
-        if (HAL_StatusTypeDef status = HAL_ADC_Stop(&tempAndVrefIntADCHandle); status != HAL_OK) {
-            return etl::unexpected<Error>{{ErrorType::TEMP_VREFINT_ADC_FAILURE, status}};
-        }
-
-        return etl::make_pair(static_cast<uint16_t>(vrefintAdcCode), static_cast<uint16_t>(adcVoltage));
-    }
-
     etl::expected<float, Error> ExternalFrontendUtilities::readAGCTemperature() {
-        if (!rxUhfActive) {
+        if (rxFrontendState == UHFRxFrontendState::OFF) {
             return etl::unexpected<Error>{{ErrorType::UHF_RX_FRONT_END_DISABLED}};
         }
 
-        auto status = getAgcTempAndVrefIntCodes();
-        if (!status.has_value()) {
-            return etl::unexpected{status.error()};
+        if (HAL_StatusTypeDef status = HAL_ADCEx_Calibration_Start(ad8318TempADCHandle, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+            status != HAL_OK) {
+            return etl::unexpected<Error>{{ErrorType::AD8318_TEMP_ADC_FAILURE, status}};
+        }
+
+        if (HAL_StatusTypeDef status = HAL_ADC_Start(ad8318TempADCHandle); status != HAL_OK) {
+            return etl::unexpected<Error>{{ErrorType::AD8318_TEMP_ADC_FAILURE, status}};
+        }
+
+        if (HAL_StatusTypeDef status = HAL_ADC_PollForConversion(ad8318TempADCHandle, TempConversionMaxDelayMs);
+            status != HAL_OK) {
+            HAL_ADC_Stop(ad8318TempADCHandle);
+            return etl::unexpected<Error>{{ErrorType::AD8318_TEMP_ADC_FAILURE, status}};
+        }
+        const uint32_t adcCode = HAL_ADC_GetValue(ad8318TempADCHandle);
+
+        if (HAL_StatusTypeDef status = HAL_ADC_Stop(ad8318TempADCHandle); status != HAL_OK) {
+            return etl::unexpected<Error>{{ErrorType::AD8318_TEMP_ADC_FAILURE, status}};
         }
 
         auto temperatureVoltageStatus = adcCodeToVoltage(
-            status.value().second,
-            status.value().first,
-            tempAndVrefIntADCMaxCode);
+            adcCode,
+            ad8318TempADCMaxCode);
         if (!temperatureVoltageStatus.has_value()) {
             return temperatureVoltageStatus;
         }
@@ -327,68 +327,77 @@ namespace ExternalFrontend {
     }
 
     etl::expected<void, Error> ExternalFrontendUtilities::lockAGC() {
-        if (!rxUhfActive) {
+        if (rxFrontendState == UHFRxFrontendState::OFF) {
             return etl::unexpected<Error>{{ErrorType::UHF_RX_FRONT_END_DISABLED}};
         }
 
-        if (!adl5330VsetDacCode.has_value()) {
-            return etl::unexpected<Error>{{ErrorType::NOT_IN_AUTOMATIC_GAIN_CONTROL_MODE}};
+        if (rxFrontendState != UHFRxFrontendState::AGC_MODE_UNLOCKED) {
+            return etl::unexpected<Error>{{ErrorType::NOT_IN_UNLOCKED_AGC_MODE}};
         }
 
         // ADC is already active and calibrated from enableUhfRxFrontend(). A new calibration is avoided to
         // perform the lock faster
-        if (auto status = HAL_ADC_PollForConversion(&gainADCHandle, GainAGCConversionMaxDelayMs);
+        if (auto status = HAL_ADC_PollForConversion(gainADCHandle, GainAGCConversionMaxDelayMs);
             status != HAL_OK) {
             return etl::unexpected<Error>{{ErrorType::GAIN_ADC_FAILURE, status}};
         }
-        const uint32_t adcCode = HAL_ADC_GetValue(&gainADCHandle);
+        const uint32_t adcCode = HAL_ADC_GetValue(gainADCHandle);
 
-        if (HAL_StatusTypeDef status = HAL_DAC_SetValue(&vsetDACHandle, dacChannelNumber, DAC_ALIGN_12B_R,
-            (adcCode * MaxDacCode) / gainADCMaxCode);
+        auto adcCodeToVoltageStatus = adcCodeToVoltage(adcCode, gainADCMaxCode);
+        if (!adcCodeToVoltageStatus.has_value()) {
+            return etl::unexpected{adcCodeToVoltageStatus.error()};
+        }
+
+        auto clampVoltageStatus = clampVoltage(adcCodeToVoltageStatus.value(), ADL5330MinVgain, ADL5330MaxVgain);
+        if (!clampVoltageStatus.has_value()) {
+            return etl::unexpected{clampVoltageStatus.error()};
+        }
+
+        auto voltageToDacCodeStatus = voltageToDACCode(clampVoltageStatus.value());
+        if (!voltageToDacCodeStatus.has_value()) {
+            return etl::unexpected{voltageToDacCodeStatus.error()};
+        }
+
+        if (HAL_StatusTypeDef status = HAL_DAC_SetValue(vsetDACHandle, dacChannelNumber, DAC_ALIGN_12B_R,
+            voltageToDacCodeStatus.value());
             status != HAL_OK) {
             return etl::unexpected<Error>{{ErrorType::SETPOINT_VOLTAGE_DAC_FAILURE, status}};
         }
 
         switchToConstantGainMode();
+        rxFrontendState = UHFRxFrontendState::AGC_MODE_LOCKED;
         return {};
     }
 
     etl::expected<void, Error> ExternalFrontendUtilities::unlockAGC() {
-        if (!rxUhfActive) {
+        if (rxFrontendState == UHFRxFrontendState::OFF) {
             return etl::unexpected<Error>{{ErrorType::UHF_RX_FRONT_END_DISABLED}};
         }
 
-        if (!adl5330VsetDacCode.has_value()) {
-            return etl::unexpected<Error>{{ErrorType::NOT_IN_AUTOMATIC_GAIN_CONTROL_MODE}};
+        if (rxFrontendState != UHFRxFrontendState::AGC_MODE_LOCKED) {
+            return etl::unexpected<Error>{{ErrorType::NOT_IN_LOCKED_AGC_MODE}};
         }
 
-        if (HAL_StatusTypeDef status = HAL_DAC_SetValue(&vsetDACHandle, dacChannelNumber, DAC_ALIGN_12B_R,adl5330VsetDacCode.value());
+        switchToAGCMode();
+        if (HAL_StatusTypeDef status = HAL_DAC_SetValue(vsetDACHandle, dacChannelNumber, DAC_ALIGN_12B_R,ad8318VsetDacCode);
             status != HAL_OK) {
             return etl::unexpected<Error>{{ErrorType::SETPOINT_VOLTAGE_DAC_FAILURE, status}};
         }
 
-        switchToAGCMode();
+        rxFrontendState = UHFRxFrontendState::AGC_MODE_UNLOCKED;
         return {};
     }
 
     etl::expected<float, Error> ExternalFrontendUtilities::readCurrentGain() {
-        if (!rxUhfActive) {
+        if (rxFrontendState == UHFRxFrontendState::OFF) {
             return etl::unexpected<Error>{{ErrorType::UHF_RX_FRONT_END_DISABLED}};
         }
 
-        // Obtain vrefInt code
-        auto status = getAgcTempAndVrefIntCodes();
-        if (!status.has_value()) {
-            return etl::unexpected{status.error()};
-        }
-        uint16_t vrefIntCode = status.value().first;
-
-        // Obtain current gain
-        if (HAL_StatusTypeDef status = HAL_ADC_PollForConversion(&gainADCHandle, GainAGCConversionMaxDelayMs); status != HAL_OK) {
+        if (HAL_StatusTypeDef status = HAL_ADC_PollForConversion(gainADCHandle, GainAGCConversionMaxDelayMs); status != HAL_OK) {
             return etl::unexpected<Error>{{ErrorType::GAIN_ADC_FAILURE, status}};
         }
 
-        auto gainVoltageStatus = adcCodeToVoltage(HAL_ADC_GetValue(&gainADCHandle), vrefIntCode, gainADCMaxCode);
+        auto gainVoltageStatus = adcCodeToVoltage(HAL_ADC_GetValue(gainADCHandle), gainADCMaxCode);
         if (!gainVoltageStatus.has_value()) {
             return gainVoltageStatus;
         }
