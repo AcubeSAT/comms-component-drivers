@@ -4,43 +4,25 @@
 #include "main.h"
 #include "etl/expected.h"
 #include "etl/optional.h"
-#include "etl/utility.h"
+#include "etl/delegate.h"
 
 namespace ExternalFrontend {
-    /**
-     * Handle to ADC that will be used to sample STM32's internal reference
-     * voltage and AD8318 temperature. It must be setup to LowPowerAutoWait,
-     * reading the internal reference first and the AD8318 temperature second
-     */
-    extern ADC_HandleTypeDef& tempAndVrefIntADCHandle;
-
-    /**
-     * Handle to ADC that will be used to sample the current gain (AD8318 Vout). It must
-     * be a dedicated ADC set to a fast sample rate and lower resolution, so locking of AGC
-     * may be performed in fewer cycles
-     */
-    extern ADC_HandleTypeDef& gainADCHandle;
-
-    /**
-    * Handle to DAC and channel number (DAC_CHANNEL_1 OR DAC_CHANNEL_2) that will be used
-    * to set the target output power (AD8318 Vset)
-    */
-    extern DAC_HandleTypeDef& vsetDACHandle;
-    extern const uint32_t dacChannelNumber;
-
     enum class ErrorType: uint8_t {
-        TEMP_VREFINT_ADC_FAILURE,
+        AD8318_TEMP_ADC_FAILURE,
         GAIN_ADC_FAILURE,
         SETPOINT_VOLTAGE_DAC_FAILURE,
         GAIN_OUT_OF_BOUNDS,
-        TARGET_OUTPUT_POWER_OUT_OF_BOUNDS,
         UHF_RX_FRONT_END_DISABLED,
-        NOT_IN_AUTOMATIC_GAIN_CONTROL_MODE,
+        NOT_IN_LOCKED_AGC_MODE,
+        NOT_IN_UNLOCKED_AGC_MODE,
         INVALID_DAC_CHANNEL_NUMBER,
         INVALID_ADC_OR_DAC_RESOLUTION,
         IDENTICAL_CALIBRATION_POINTS,
-        INVALID_VOLTAGE,
-        INVALID_CODE
+        VOLTAGE_OUT_OF_BOUNDS,
+        INVALID_CODE,
+        NULL_PTR,
+        INVALID_DELEGATE,
+        INVALID_VREF
     };
 
     struct Error {
@@ -64,10 +46,26 @@ namespace ExternalFrontend {
          *
          * @param ad8318_Vset1, ad8318_Vset2, ad8318_Pout1, ad8318_Pout2
          *
+         * @param ad8318Temp_ADCHandle Handle to ADC that will be used to sample AD8318's temperature.
+         *
+         * @param gain_ADCHandle Handle to ADC that will be used to sample the current gain (AD8318 Vout). It must
+         *        be a dedicated ADC, set to a fast sample rate and lower resolution, so locking of AGC
+         *        may be performed in fewer cycles
+         *
+         * @param  vset_DACHandle, dac_ChannelNumber Handle to DAC and channel number (DAC_CHANNEL_1 OR DAC_CHANNEL_2) that will be used
+         *          to set the target output power (AD8318 Vset)
+         *
+         * @param get_Vref A function that returns VREF+ (ADC and DAC reference voltage) when called
+         *
          * @note This function does not configure the ADC and DAC peripherals. It is assumed that the HAL initialization
          *       code is run beforehand
          */
         [[nodiscard]] etl::expected<void, Error> initialize(
+            ADC_HandleTypeDef* ad8318Temp_ADCHandle,
+            ADC_HandleTypeDef* gain_ADCHandle,
+            DAC_HandleTypeDef* vset_DACHandle,
+            uint32_t dac_ChannelNumber,
+            etl::delegate<float()> get_Vref,
             float ad8318_Vset1,
             float ad8318_Vset2,
             float ad8318_Pout1,
@@ -75,7 +73,6 @@ namespace ExternalFrontend {
 
         /// Flags that get set to true from a callback, in case the current limiters FLAGB pin goes
         ///  LOW, due to output overcurrent, input undervoltage or overheating.
-        ///  todo use irq handlers notifying comms manager instead
         volatile bool currentLimiterAlertTxUHF = false;
         volatile bool currentLimiterAlertRxUHF = false;
         volatile bool currentLimiterAlertSBAND = false;
@@ -142,44 +139,47 @@ namespace ExternalFrontend {
         [[nodiscard]] etl::expected<float, Error> readCurrentGain();
 
     private:
+        enum class UHFRxFrontendState : uint8_t {
+            OFF,
+            CONSTANT_GAIN_MODE,
+            AGC_MODE_LOCKED,
+            AGC_MODE_UNLOCKED
+        };
+
         /**
          * Route output of DAC directly to ADL5330
          */
-        static void switchToConstantGainMode() {
+        void switchToConstantGainMode() {
             HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_SET);
         }
 
         /**
          * Route output of DAC to AD8318
          */
-        static void switchToAGCMode() {
+        void switchToAGCMode() {
             HAL_GPIO_WritePin(EN_AGC_UHF_GPIO_Port, EN_AGC_UHF_Pin, GPIO_PIN_RESET);
         }
 
         /**
          * Convert ADC code to voltage (in mV)
-         *
-         * @param vrefIntCode STM32's voltage reference source measurement, sampled right before the function call
          */
-        [[nodiscard]] etl::expected<float, Error> adcCodeToVoltage(uint16_t adcCode, uint16_t vrefIntCode, uint32_t adcMaxCode);
+        [[nodiscard]] etl::expected<float, Error> adcCodeToVoltage(uint16_t adcCode, uint32_t adcMaxCode);
 
         /**
          * Convert a voltage (in mV) to DAC code
-         *
-         * @param vrefIntCode STM32's voltage reference source measurement, sampled right before the function call
          */
-        [[nodiscard]] etl::expected<uint16_t, Error> voltageToDACCode(float voltage, uint16_t vrefIntCode);
+        [[nodiscard]] etl::expected<uint16_t, Error> voltageToDACCode(float voltage);
 
         [[nodiscard]] etl::expected<uint32_t, Error> getMaxADCCode(ADC_HandleTypeDef& adcHandle);
+
+        [[nodiscard]] etl::expected<float, Error> clampVoltage(float voltage, float lower, float upper);
 
         /**
          * @note The ADL5330 gain is equal to G (dB) = Pout - Pin, so ADL5330MinGain < Pout - Pin < ADL5330MaxGain
          *       For fixed Pin, the achievable Pout range is: ADL5330MinGain + Pin < Pout < ADL5330MaxGain + Pin
          *
-         *       If the targetOutputPowerDBm is outside these limits, the AD8318 will just clip the ADL5330 to the
-         *       maximum or minimum possible gain, depending on if the the lower or upper limit is violated respectively.
-         *       This function will return a INVALID_VOLTAGE error only if the given
-         *       targetOutputPowerDBm results in a voltage outside the range [0, VDDA]
+         *       This function will return a VOLTAGE_OUT_OF_BOUNDS error if the given
+         *       targetOutputPowerDBm results in a voltage outside the range [AD8318MinVset, AD8318MaxVset]
          */
         [[nodiscard]] etl::expected<float, Error> targetOutputPowerToVoltage(float targetOutputPowerDBm);
 
@@ -188,30 +188,29 @@ namespace ExternalFrontend {
         [[nodiscard]] etl::expected<float, Error> voltageToGain(float gainVoltage);
 
         /**
-         * @returns A pair of the VrefInt and ADL8318's temperature ADC codes (in that order), as read by the
-         *          ADC corresponding to the handle: tempAndVrefIntADCHandle
-         */
-        [[nodiscard]] etl::expected<etl::pair<uint16_t, uint16_t>, Error> getAgcTempAndVrefIntCodes();
-
-        /**
          * @brief Calibrates gain ADC, vset DAC, and then powers up the rx frontend
          *
          * @param agcMode If set to true, agc mode is chosen. Otherwise, constant gain mode
          */
         [[nodiscard]] etl::expected<void, Error> enableUhfRxFrontend(float vset, bool agcMode);
 
+        ADC_HandleTypeDef* ad8318TempADCHandle = nullptr;
+        ADC_HandleTypeDef* gainADCHandle = nullptr;
+        DAC_HandleTypeDef* vsetDACHandle = nullptr;
+        uint32_t dacChannelNumber = DAC_CHANNEL_2;
+        etl::delegate<float()> getVref;
+
         /// State of external frontend chains
         bool txUhfActive = false;
-        bool rxUhfActive = false;
         bool sbandActive = false;
+        UHFRxFrontendState rxFrontendState = UHFRxFrontendState::OFF;
 
-        uint32_t tempAndVrefIntADCMaxCode = (1U << 12) - 1;
+        uint32_t ad8318TempADCMaxCode = (1U << 12) - 1;
         uint32_t gainADCMaxCode = (1U << 12) - 1;
         static constexpr uint32_t MaxDacCode = (1U << 12) - 1;
 
         /// Stores dac code that corresponds to the user targetOutputPowerDBm, given in enableUhfRxFrontendAutomaticGainControl()
-        /// The absence of a value indicates that the UHF Rx frontend is in constant gain mode
-        etl::optional<uint16_t> adl5330VsetDacCode;
+        uint16_t ad8318VsetDacCode;
 
         static constexpr uint16_t TempConversionMaxDelayMs = 15;
         static constexpr uint16_t GainAGCConversionMaxDelayMs = 15;
@@ -241,6 +240,8 @@ namespace ExternalFrontend {
         float ad8318Pout1 = 0; // dBm
         float ad8318Pout2 = 0; // dBm
         float ad8318VsetSlope = 0; // mV/dBm
+
+        static constexpr float VoltageBoundTolerance = 30; // mV
     };
 
     extern ExternalFrontendUtilities externalFrontendUtils;
